@@ -36,8 +36,10 @@ it is impossible to make 🧀 without love
 
 ## A cheesy story
 
-One day I found a perfectly executed rug on pump.fun.  Really, it was perfect and the original creator of 🧀 rugged it into the stone age.  And I'd recently gotten rugged.  Then I began to wonder about how to make a more stable, less ruggable meme coin.  🧀 Seemed the perfect template.  🧀 has >60 permanently locked liquidity pools on Solana.
+One day I found a perfectly executed rug on pump.fun.  Really, it was perfect and the original creator of 🧀 rugged it into the stone age.  And I'd recently gotten rugged.  Then I began to wonder about how to make a more stable, less ruggable meme coin.  🧀 Seemed the perfect template.  So I started to rug 🧀 but without the ruthless efficency of the originator, and with the agreement of the 🧀 community -- to my surprise, people were really interested in this!  So I began to "melt" 🧀 into permanently locked pools that are pretty much incapable of rugging.  🧀 can fluctuate in price like any asset on capitalist markets, but as the 🧀 matures, it will get harder and harder to make a sudden, negative impact to its price.  
+
+🧀 has >60 permanently locked liquidity pools on Solana.
 
 * https://solscan.io/token/A3hzGcTxZNSc7744CWB2LR5Tt9VTtEaQYpP6nwripump?sortBy=total_volumn_24h#markets
 
-Along the way of CTOing 🧀, I noticed that routers did not work as well as thought.   
+Along the way of CTOing 🧀, I noticed that routers did not work as well as thought.   Probably this will lead to some kind of routing product, but that has nothing to do with 🧀.  If you like 🧀, please, enjoy it with us, and melt it into permanent pools with us. 
