@@ -1,2 +1,2 @@
 [workspace]
-members = ["packages/update-readme"]
+members = ["packages/update-readme", "packages/price-balancer"]
