@@ -71,7 +71,7 @@ Total Cheese qty:       567204813.32
 | Meteora  | 7dGbPgUxKpB5qWiLRKcTQSC3om1fPzUpgGAFfwej9hXx | GCR        | 1992622.11 |  243494.77 | volatile   |       243.68 |        95.43 |     6 | CdxCb7krK9GFWghkb6phR7SJhdFZ5hY6jU4PfXM9vMrX |
 | Meteora  | B5WTLaRwaUQpKk7ir1wniNB6m5o8GgMrimhKMYan2R6B | Pepe       | 1987319.25 |   43964.91 | volatile   |       228.97 |        94.94 |     6 | FuT2xognvqkSYu2sUHLRU8iaj3Rjb4NgyWDMJj7eHuZh |
 | Meteora  | 2qEHjDLDLbuBgRYvsxhc5D6uDWAivNFZGan56P1tpump | Pnut       | 1976907.92 |     182.88 | volatile   |       221.95 |        87.13 |     6 | 6S6NNse5dZWdm841QLLcuMt6hkNybr7ULqzgh23Q8wkw |
-| Meteora  | 69G8CpUVZAxbPMiEBrfCCCH445NwFxH6PzVL693Xpump | xavier     | 1799541.33 |  799217.56 | volatile   |       218.54 |        84.32 |     6 | AkdXiSK2RekFcGsuLvVpWaAeh5tioLJxrihzNTPXfWr  |
+| Meteora  | 69G8CpUVZAxbPMiEBrfCCCH445NwFxH6PzVL693Xpump | xavier     | 1799541.33 |  7cd 99217.56 | volatile   |       218.54 |        84.32 |     6 | AkdXiSK2RekFcGsuLvVpWaAeh5tioLJxrihzNTPXfWr  |
 | Meteora  | EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm | $WIF       | 1590348.14 |      53.99 | volatile   |       203.65 |        69.93 |     6 | ERSxacWnUDUYybGSEhQAYvf29vyNQiSRArBcBD2oqYJJ |
 | Meteora  | CNvitvFnSM5ed6K28RUNSaAjqqz5tX1rA5HgaBN9pump | FRED       | 1070768.82 |    3107.60 | volatile   |       129.09 |        64.09 |     6 | Dne9QjdhRXxAiRYCnhANGbwUip9grqnqNPLLNyMpPNKT |
 | Meteora  | 9wBNNCXg8pb4SZpTY868CEr74S25Qy1JmGHFwo9F37dC | sugar      |   45711.59 |   32234.94 | volatile   |         4.84 |         1.25 |     6 | 6ozXSmmUUUdGhjyLWUmzohRJVDva12NJELdqAz8GxBUa |
