@@ -129,6 +129,11 @@ Cheese currently has **84** pools on Meteora alone (with many more on other chai
 | 3r8igbjdAsWRyqo84FXBnpQFDEstTUu3GwkuUb8hpump | BREAD      | volatile   |         0.00 |         0.00 |  0.25 | AU6LZGa3UUCV6Jd5kBwV8dFnQ4jPnscpRTrTMdxbomKR |
 | GbWDsxSYG36CfU5mmKSMpq1ANFuT97B9pW7pM2A8WEwV | CULT       | volatile   |         0.00 |         0.00 |     6 | CYaYTx1A8nFJJE8cFNWbDcbdQey11L8AEdru6v7MCR8F |
 
+## Software
+
+This repostory contains [./packages](packages) and currently this features the price balancer and the update-readme.
+
+
 ## The Cheese Visualizer
 
 We are developing a **Cheese World Network Visualizer** to display the numerous **fondue pools** of melted 🧀 across all supporting blockchains. The core features are:
