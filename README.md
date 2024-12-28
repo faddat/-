@@ -23,10 +23,9 @@ One day I found a perfectly executed rug on pump.fun. Really, it was perfect, an
 
 So I began to **"melt" 🧀** into permanently locked pools that are pretty much incapable of rugging. **🧀** can fluctuate in price like any asset on capitalist markets, but as the cheese matures, it will get harder and harder to make a sudden, negative impact to its price.
 
-**🧀 has >60 permanently locked liquidity pools on Solana.**  
-[See more on Solscan](https://solscan.io/token/A3hzGcTxZNSc7744CWB2LR5Tt9VTtEaQYpP6nwripump?sortBy=total_volumn_24h#markets)
+**🧀 experiments with Meteora liquidity pools**  
+We've got 84 liqudiity pools so far, most of them permanently locked.
 
-Along the way of CTOing **🧀**, I noticed that routers did not work as well as thought. Probably this will lead to some kind of routing product, but that has nothing to do with **🧀**. If you like **🧀**, please enjoy it with us, and melt it into permanent pools with us.
 
 ---
 
