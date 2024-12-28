@@ -5,13 +5,11 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use tokio::time::{sleep, Duration};
 
-/// The Cheese mint on Solana
 const CHEESE_MINT: &str = "A3hzGcTxZNSc7744CWB2LR5Tt9VTtEaQYpP6nwripump";
 
-// ======================
-// = Part 1: Data Models
-// ======================
-
+// -----------------------------------
+// Part 1: Data Models
+// -----------------------------------
 #[derive(Debug, Deserialize)]
 struct PaginatedPoolSearchResponse {
     data: Vec<MeteoraPool>,
@@ -38,6 +36,10 @@ struct MeteoraPool {
 
     #[serde(alias = "trading_volume")]
     daily_volume: f64,
+
+    // Add pool_token_amounts so we can show how much CHEESE + other is in the pool
+    #[serde(default)]
+    pool_token_amounts: Vec<String>,
 }
 
 fn de_string_to_f64<'de, D>(deserializer: D) -> std::result::Result<f64, D::Error>
@@ -115,12 +117,14 @@ struct RaydiumDayStats {
     volume: f64,
 }
 
-/// Our final unified Display model
+/// Our final table structure
 #[derive(Debug)]
 struct DisplayPool {
     source: String, // "Meteora" or "Raydium"
     other_mint: String,
-    other_symbol: String, // fallback to parse
+    other_symbol: String,
+    cheese_qty: String, // how much Cheese is in the pool
+    other_qty: String,  // how much of other asset is in the pool
     pool_type: String,
     liquidity_usd: String,
     volume_usd: String,
@@ -128,10 +132,9 @@ struct DisplayPool {
     pool_address: String,
 }
 
-// ======================
-// = Networking
-// ======================
-
+// -----------------------------------
+// Part 2: Networking
+// -----------------------------------
 async fn fetch_meteora_cheese_pools(client: &Client) -> Result<Vec<MeteoraPool>> {
     let base_url = "https://amm-v2.meteora.ag";
     let search_url = format!("{}/pools/search", base_url);
@@ -222,7 +225,6 @@ async fn fetch_raydium_mint_ids(
 }
 
 async fn fetch_raydium_cheese_pools(client: &Client) -> Result<Vec<RaydiumPoolDetailed>> {
-    // e.g. /pools/info/mint?mint1=CHEESE&poolType=all&...
     let url = format!(
         "https://api-v3.raydium.io/pools/info/mint?mint1={}&poolType=all&poolSortField=default&sortType=desc&pageSize=1000&page=1",
         CHEESE_MINT
@@ -249,10 +251,9 @@ async fn fetch_raydium_cheese_pools(client: &Client) -> Result<Vec<RaydiumPoolDe
     Ok(parsed.data.data)
 }
 
-// ======================
-// = Main
-// ======================
-
+// -----------------------------------
+// Part 3: Main
+// -----------------------------------
 #[tokio::main]
 async fn main() -> Result<()> {
     let client = Client::new();
@@ -280,20 +281,32 @@ async fn main() -> Result<()> {
     let mut final_pools = Vec::new();
     for pool in &meteora_pools {
         // figure out which is Cheese, which is other
-        let (_cheese_side, other_mint) = if pool.pool_token_mints.len() >= 2 {
+        let (cheese_ix, other_ix) = if pool.pool_token_mints.len() == 2 {
             if pool.pool_token_mints[0] == CHEESE_MINT {
-                (
-                    pool.pool_token_mints[0].clone(),
-                    pool.pool_token_mints[1].clone(),
-                )
+                (0, 1)
             } else {
-                (
-                    pool.pool_token_mints[1].clone(),
-                    pool.pool_token_mints[0].clone(),
-                )
+                (1, 0)
             }
         } else {
-            (CHEESE_MINT.to_string(), "???".to_string())
+            // fallback if there's only 1 or none
+            (0, 0)
+        };
+
+        let cheese_amt_str = if pool.pool_token_amounts.len() > cheese_ix {
+            pool.pool_token_amounts[cheese_ix].clone()
+        } else {
+            "".to_string()
+        };
+
+        let other_mint = if pool.pool_token_mints.len() > other_ix {
+            pool.pool_token_mints[other_ix].clone()
+        } else {
+            "".to_string()
+        };
+        let other_amt_str = if pool.pool_token_amounts.len() > other_ix {
+            pool.pool_token_amounts[other_ix].clone()
+        } else {
+            "".to_string()
         };
 
         // If Raydium doesn't have a symbol, fallback to parse from pool_name
@@ -304,8 +317,10 @@ async fn main() -> Result<()> {
 
         final_pools.push(DisplayPool {
             source: "Meteora".to_string(),
-            other_mint: other_mint.clone(),
+            other_mint: other_mint,
             other_symbol,
+            cheese_qty: cheese_amt_str,
+            other_qty: other_amt_str,
             pool_type: pool.pool_type.clone(),
             liquidity_usd: format!("{:.2}", pool.pool_tvl),
             volume_usd: format!("{:.2}", pool.daily_volume),
@@ -317,21 +332,25 @@ async fn main() -> Result<()> {
     // 4) Raydium cheese pools
     let raydium_cheese_pools = fetch_raydium_cheese_pools(&client).await?;
     for rp in &raydium_cheese_pools {
-        let (other_mint, _is_cheese_side_a) = if rp.mintA.address == CHEESE_MINT {
-            (rp.mintB.address.clone(), true)
-        } else {
-            (rp.mintA.address.clone(), false)
-        };
-
-        let other_symbol = mint_to_symbol.get(&other_mint).cloned().unwrap_or_else(|| {
-            // fallback is the raw mint from Raydium. Or we can do a short parse.
-            // There's no "pool_name" here from Raydium, so let's just do the minted name:
+        // figure out which side is Cheese, which is other
+        let (cheese_side_amt, other_side_amt, other_mint_addr, other_symbol) =
             if rp.mintA.address == CHEESE_MINT {
-                rp.mintB.symbol.clone()
+                // A is cheese
+                let oh_mint = rp.mintB.address.clone();
+                let oh_sym = mint_to_symbol
+                    .get(&oh_mint)
+                    .cloned()
+                    .unwrap_or(rp.mintB.symbol.clone());
+                (rp.mint_amount_a, rp.mint_amount_b, oh_mint, oh_sym)
             } else {
-                rp.mintA.symbol.clone()
-            }
-        });
+                // B is cheese
+                let oh_mint = rp.mintA.address.clone();
+                let oh_sym = mint_to_symbol
+                    .get(&oh_mint)
+                    .cloned()
+                    .unwrap_or(rp.mintA.symbol.clone());
+                (rp.mint_amount_b, rp.mint_amount_a, oh_mint, oh_sym)
+            };
 
         let daily_vol = rp.day.volume;
         let tvl = rp.tvl;
@@ -339,8 +358,10 @@ async fn main() -> Result<()> {
 
         final_pools.push(DisplayPool {
             source: "Raydium".to_string(),
-            other_mint: other_mint.clone(),
+            other_mint: other_mint_addr,
             other_symbol,
+            cheese_qty: format!("{:.2}", cheese_side_amt),
+            other_qty: format!("{:.2}", other_side_amt),
             pool_type: rp.r#type.clone(),
             liquidity_usd: format!("{:.2}", tvl),
             volume_usd: format!("{:.2}", daily_vol),
@@ -349,41 +370,41 @@ async fn main() -> Result<()> {
         });
     }
 
+    // 5) Print everything
     print_table(&final_pools);
 
     sleep(Duration::from_secs(2)).await;
     Ok(())
 }
 
-/// If Raydium minted data isn't found, we parse from pool_name
-/// e.g. if pool_name is "CHEESE-Ross", parse "Ross".
+// -----------------------------------
+// Part 4: Helpers
+// -----------------------------------
 fn parse_other_token_name(pool_name: &str) -> String {
     let parts: Vec<&str> = pool_name.split('-').collect();
     if parts.len() == 2 {
         let left = parts[0].trim();
         let right = parts[1].trim();
-
-        // If left is 🧀 or "cheese", return right
         if left.contains("🧀") || left.to_lowercase().contains("cheese") {
             return right.to_string();
         }
-        // If right is 🧀 or "cheese", return left
         if right.contains("🧀") || right.to_lowercase().contains("cheese") {
             return left.to_string();
         }
-        // fallback to right if we can't detect
         return right.to_string();
     }
-    // fallback
     pool_name.to_string()
 }
 
 fn print_table(pools: &[DisplayPool]) {
+    // Notice the extra columns: Cheese Qty, Other Qty
     println!(
-        "| {:<8} | {:<44} | {:<10} | {:<10} | {:>12} | {:>12} | {:>5} | {:<44} |",
+        "| {:<8} | {:<44} | {:<10} | {:>10} | {:>10} | {:<10} | {:>12} | {:>12} | {:>5} | {:<44} |",
         "Source",
         "Other Mint",
         "Symbol",
+        "Cheese Qty",
+        "Other Qty",
         "Pool Type",
         "Liquidity($)",
         "Volume($)",
@@ -392,9 +413,11 @@ fn print_table(pools: &[DisplayPool]) {
     );
 
     println!(
-        "|-{}-|-{}-|-{}-|-{}-|-{}-|-{}-|-{}-|-{}-|",
+        "|-{}-|-{}-|-{}-|-{}-|-{}-|-{}-|-{}-|-{}-|-{}-|-{}-|",
         "-".repeat(8),
         "-".repeat(44),
+        "-".repeat(10),
+        "-".repeat(10),
         "-".repeat(10),
         "-".repeat(10),
         "-".repeat(12),
@@ -405,10 +428,12 @@ fn print_table(pools: &[DisplayPool]) {
 
     for dp in pools {
         println!(
-            "| {:<8} | {:<44} | {:<10} | {:<10} | {:>12} | {:>12} | {:>5} | {:<44} |",
+            "| {:<8} | {:<44} | {:<10} | {:>10} | {:>10} | {:<10} | {:>12} | {:>12} | {:>5} | {:<44} |",
             dp.source,
             truncate(&dp.other_mint, 44),
             truncate(&dp.other_symbol, 10),
+            dp.cheese_qty,
+            dp.other_qty,
             truncate(&dp.pool_type, 10),
             dp.liquidity_usd,
             dp.volume_usd,
@@ -418,7 +443,6 @@ fn print_table(pools: &[DisplayPool]) {
     }
 }
 
-/// Utility for short columns
 fn truncate(input: &str, max_len: usize) -> String {
     if input.len() <= max_len {
         input.to_string()
