@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use reqwest::Client;
-use serde::Deserialize;
 use serde::de::{self, Deserializer};
+use serde::Deserialize;
 use tokio::time::{sleep, Duration};
 
 /// The Cheese mint on Solana
@@ -52,7 +52,7 @@ struct CheesePoolPrice {
     pool_name: String,
     price_usd: f64,
     fee_pct: f64,
-    tvl: f64,  // to identify < $600
+    tvl: f64, // to identify < $600
 }
 
 /// A simple wallet struct
@@ -107,8 +107,8 @@ async fn main() -> Result<()> {
 
     // A simple wallet
     let mut wallet = Wallet {
-        leftover_cheese: 10000.0,  // we have some cheese to start
-        leftover_other:  0.0,      // or we track "other tokens" if we want
+        leftover_cheese: 10000.0, // we have some cheese to start
+        leftover_other: 0.0,      // or we track "other tokens" if we want
     };
 
     // Step 2: compute an implied price for each pool
@@ -196,11 +196,13 @@ async fn main() -> Result<()> {
 
     // Step 5: For pools under $600, deposit Cheese + "other token"
     // We'll find the ones with tvl < 600, sorted ascending
-    let mut under_600: Vec<&CheesePoolPrice> = pool_prices
-        .iter()
-        .filter(|pp| pp.tvl < 600.0)
-        .collect();
-    under_600.sort_by(|a, b| a.tvl.partial_cmp(&b.tvl).unwrap_or(std::cmp::Ordering::Equal));
+    let mut under_600: Vec<&CheesePoolPrice> =
+        pool_prices.iter().filter(|pp| pp.tvl < 600.0).collect();
+    under_600.sort_by(|a, b| {
+        a.tvl
+            .partial_cmp(&b.tvl)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // We deposit in ascending order
     for pp in under_600 {
@@ -242,7 +244,10 @@ async fn main() -> Result<()> {
     }
 
     // Final summary
-    println!("\nFinal leftover Cheese: {:.2}, leftover Other: {:.2}", wallet.leftover_cheese, wallet.leftover_other);
+    println!(
+        "\nFinal leftover Cheese: {:.2}, leftover Other: {:.2}",
+        wallet.leftover_cheese, wallet.leftover_other
+    );
 
     println!("Done balancing & depositing!");
     sleep(Duration::from_secs(2)).await;
