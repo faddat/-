@@ -22,7 +22,7 @@ pub struct RaydiumMintPoolsData {
     pub data: Vec<RaydiumPoolDetailed>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct RaydiumPoolDetailed {
     #[serde(default, alias = "type")]
     pub rtype: String,
@@ -65,7 +65,7 @@ pub struct RaydiumDayStats {
     pub volume: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct RaydiumMintItem {
     #[serde(default)]
     pub address: String,

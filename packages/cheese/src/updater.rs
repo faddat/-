@@ -51,7 +51,7 @@ pub async fn run_readme_updater() -> Result<()> {
     // 3) Possibly gather minted data. The original code also did Raydium "mint/ids",
     //    so you can do that here if you wish. We'll skip for brevity or do partial:
     //    (In the original code, you stored results in a map. We replicate as needed.)
-    let mut mint_to_symbol = HashMap::new();
+    let mut mint_to_symbol: HashMap<String, String> = HashMap::new();
     // e.g. if you want to do some minted data queries, or just do fallback logic
 
     // 4) Convert meteora to DisplayPool
