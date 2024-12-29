@@ -1,108 +1,50 @@
+// lib/src/balancer.rs
+//
+// This module encapsulates the entire "price-balancer" logic that was originally in
+// price-balancer/src/main.rs. We replicate that feature set and data flow here, so
+// that the main file can remain minimal.
+
 use anyhow::{anyhow, Result};
-use cheese::common::de_string_to_f64;
-use cheese::common::percent_diff;
 use reqwest::Client;
-use serde::de::{self, Deserializer};
-use serde::Deserialize;
 use tokio::time::{sleep, Duration};
 
-/// The Cheese mint on Solana
-const CHEESE_MINT: &str = "A3hzGcTxZNSc7744CWB2LR5Tt9VTtEaQYpP6nwripump";
+use crate::{
+    common::{percent_diff, CHEESE_MINT},
+    meteora::{fetch_meteora_cheese_pools, MeteoraPool},
+};
 
-/// Meteora's paginated response
-#[derive(Debug, Deserialize)]
-struct PaginatedResponse {
-    data: Vec<PoolInfo>,
-    page: i32,
-    total_count: i32,
+/// A simple "wallet" struct to track leftover cheese & stable
+#[derive(Debug)]
+pub struct Wallet {
+    pub leftover_cheese: f64,
+    pub leftover_other: f64,
 }
 
-/// Pool info from Meteora
-#[derive(Debug, Deserialize)]
-struct PoolInfo {
-    pool_address: String,
-    pool_name: String,
-    pool_token_mints: Vec<String>,
-    pool_type: String,
-    total_fee_pct: String,
-    unknown: bool,
-    permissioned: bool,
-
-    #[serde(deserialize_with = "de_string_to_f64")]
-    pool_tvl: f64,
-
-    #[serde(alias = "trading_volume")]
-    daily_volume: f64,
-
-    #[serde(default)]
-    pool_token_amounts: Vec<String>,
-}
-
-/// For storing partial pool data with implied price
+/// A smaller struct for storing partial pool data
 #[derive(Debug)]
 struct CheesePoolPrice {
     pool_address: String,
     pool_name: String,
     price_usd: f64,
     fee_pct: f64,
-    tvl: f64, // to identify < $600
+    tvl: f64,
 }
 
-/// A simple wallet struct
-#[derive(Debug)]
-struct Wallet {
-    leftover_cheese: f64,
-    leftover_other: f64, // Possibly we accumulate other tokens if we rebalanced
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
+/// The main rebalancing function, replicating all steps from the original price-balancer main
+/// (fetch, compute implied prices, rebalancing trades, etc.).
+pub async fn run_price_balancer() -> Result<()> {
     let client = Client::new();
-    let base_url = "https://amm-v2.meteora.ag/pools/search";
+    let mut wallet = Wallet {
+        leftover_cheese: 10_000.0,
+        leftover_other: 0.0,
+    };
 
-    let mut all_pools = Vec::new();
-    let mut page = 0;
-    let size = 50;
-
-    // Step 1: fetch all Cheese pools
-    loop {
-        println!("Fetching page {}...", page);
-        let resp = client
-            .get(base_url)
-            .query(&[
-                ("page", page.to_string()),
-                ("size", size.to_string()),
-                ("include_token_mints", CHEESE_MINT.to_string()),
-            ])
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            return Err(anyhow!("API request failed: {}", resp.status()));
-        }
-
-        let data: PaginatedResponse = resp.json().await?;
-        println!("Got {} pools on page {}", data.data.len(), data.page);
-
-        all_pools.extend(data.data);
-
-        let fetched_so_far = (page + 1) * size;
-        if fetched_so_far as i32 >= data.total_count {
-            break;
-        }
-        page += 1;
-    }
-
+    // Step 1: fetch all Cheese pools from Meteora
+    let all_pools: Vec<MeteoraPool> = fetch_meteora_cheese_pools(&client).await?;
     println!(
         "\nFetched a total of {} Cheese pools from Meteora.\n",
         all_pools.len()
     );
-
-    // A simple wallet
-    let mut wallet = Wallet {
-        leftover_cheese: 10000.0, // we have some cheese to start
-        leftover_other: 0.0,      // or we track "other tokens" if we want
-    };
 
     // Step 2: compute an implied price for each pool
     let mut pool_prices = Vec::new();
@@ -158,10 +100,9 @@ async fn main() -> Result<()> {
             continue;
         }
 
-        // Decide a small trade
         let trade_size_cheese = 100.0;
         if pp.price_usd > fair_price {
-            // overpriced => sell cheese
+            // overpriced => SELL cheese
             println!(
                 "[{}] Overpriced by {:.2}%. SELL cheese => leftover stable?",
                 pp.pool_name, diff_pct
@@ -172,23 +113,21 @@ async fn main() -> Result<()> {
                 let stable_gained = trade_size_cheese * pp.price_usd;
                 // apply fee
                 let actual_stable = stable_gained * (1.0 - pp.fee_pct / 100.0);
-                // we store it as leftover_other in this example
                 wallet.leftover_other += actual_stable;
             } else {
                 println!("Not enough cheese to sell for rebalance.");
             }
         } else {
-            // underpriced => buy cheese
+            // underpriced => BUY cheese
             println!(
                 "[{}] Underpriced by {:.2}%. BUY cheese => leftover stable spent?",
                 pp.pool_name, diff_pct
             );
-            // if we had stable, we could spend it. But let's skip in this example
+            // if we had stable, we would spend it. We'll skip in this example
         }
     }
 
     // Step 5: For pools under $600, deposit Cheese + "other token"
-    // We'll find the ones with tvl < 600, sorted ascending
     let mut under_600: Vec<&CheesePoolPrice> =
         pool_prices.iter().filter(|pp| pp.tvl < 600.0).collect();
     under_600.sort_by(|a, b| {
@@ -197,41 +136,28 @@ async fn main() -> Result<()> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // We deposit in ascending order
     for pp in under_600 {
-        // figure out how much we need to deposit to bring it up to $600
         let needed = 600.0 - pp.tvl;
-        if needed <= 0.0 {
-            continue;
-        }
         println!(
             "[{}] TVL ${:.2} < $600 => deposit Cheese + other token to raise ~${:.2}",
             pp.pool_name, pp.tvl, needed
         );
-        // In reality, you’d do a real deposit: we pair Cheese with the "unstable" asset
-        // We assume we convert leftover_other to that "unstable" asset if needed.
-
-        // For demonstration, let's deposit half Cheese, half "other"
-        // So half in Cheese => needed/2 / price => how many cheese we deposit
         let half_needed = needed / 2.0;
         let cheese_deposit = half_needed / fair_price;
         if wallet.leftover_cheese < cheese_deposit {
-            println!("Not enough cheese leftover to deposit in this pool. Skipping...");
+            println!("Not enough cheese leftover. Skipping...");
             continue;
         }
         wallet.leftover_cheese -= cheese_deposit;
 
-        // We also need an "other" deposit => let's see if leftover_other is enough
-        // For demonstration, assume leftover_other is in USD value or convertible at 1:1
         if wallet.leftover_other < half_needed {
-            println!("Not enough 'other' leftover to deposit. Skipping or partial deposit...");
+            println!("Not enough 'other' leftover. Skipping or partial deposit...");
             continue;
         }
         wallet.leftover_other -= half_needed;
 
-        // We pretend we've deposited. TVL is ~600 now
         println!(
-            " -> Deposited ~{:.2} Cheese & ${:.2} of other. Pool is near $600 now!",
+            " -> Deposited ~{:.2} Cheese & ${:.2} of other => new TVL ~600",
             cheese_deposit, half_needed
         );
     }
@@ -242,7 +168,7 @@ async fn main() -> Result<()> {
         wallet.leftover_cheese, wallet.leftover_other
     );
 
-    println!("Done balancing & depositing!");
+    println!("Done balancing & depositing!\n");
     sleep(Duration::from_secs(2)).await;
     Ok(())
 }
