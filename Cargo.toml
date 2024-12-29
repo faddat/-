@@ -1,3 +1,6 @@
+
+
+
 [workspace]
-workspace.resolver = "2"
 members = ["packages/update-readme", "packages/price-balancer"]
+resolver = "2"
