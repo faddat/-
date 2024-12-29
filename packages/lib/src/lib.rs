@@ -106,9 +106,4 @@ pub fn percent_diff(a: f64, b: f64) -> f64 {
     }
 }
 
-// add a main hello world function
-pub fn main() {
-    println!("Hello, world!");
-}
-
-// More shared code can be added here: data models for Raydium, fetchers, etc.
+// More shared code can be added here: data mgitodels for Raydium, fetchers, etc.
