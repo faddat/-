@@ -2,5 +2,5 @@
 
 
 [workspace]
-members = ["packages/update-readme", "packages/price-balancer"]
+members = ["packages/update-readme", "packages/price-balancer", "packages/lib"]
 resolver = "2"
