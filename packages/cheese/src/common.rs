@@ -3,7 +3,6 @@ use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
-use std::collections::HashSet;
 
 pub const CHEESE_MINT: &str = "A3hzGcTxZNSc7744CWB2LR5Tt9VTtEaQYpP6nwripump";
 
