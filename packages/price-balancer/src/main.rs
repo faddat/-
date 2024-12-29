@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use cheese::common::de_string_to_f64;
+use cheese::common::percent_diff;
 use reqwest::Client;
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
@@ -13,15 +15,6 @@ struct PaginatedResponse {
     data: Vec<PoolInfo>,
     page: i32,
     total_count: i32,
-}
-
-// For fields that may be numeric strings
-fn de_string_to_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    s.parse().map_err(de::Error::custom)
 }
 
 /// Pool info from Meteora
@@ -252,13 +245,4 @@ async fn main() -> Result<()> {
     println!("Done balancing & depositing!");
     sleep(Duration::from_secs(2)).await;
     Ok(())
-}
-
-/// Return the absolute difference as a percentage of their average
-fn percent_diff(a: f64, b: f64) -> f64 {
-    if (a + b) == 0.0 {
-        0.0
-    } else {
-        ((a - b).abs() * 200.0) / (a + b)
-    }
 }
