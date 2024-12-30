@@ -12,69 +12,10 @@ use solana_sdk::{
 use std::{str::FromStr, time::Duration};
 use tokio::time::sleep;
 
-const JUPITER_QUOTE_API: &str = "https://quote-api.jup.ag/v6/quote";
-const JUPITER_SWAP_API: &str = "https://quote-api.jup.ag/v6/swap";
+use crate::meteora::{self, MeteoraPool};
+
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
-
-#[derive(Debug, Serialize)]
-struct JupiterQuoteRequest {
-    input_mint: String,
-    output_mint: String,
-    amount: String,    // Amount in lamports/smallest decimals
-    slippage_bps: u64, // e.g. 50 = 0.5%
-}
-
-#[derive(Debug, Deserialize, Clone, Serialize)]
-struct JupiterQuoteResponse {
-    input_mint: String,
-    output_mint: String,
-    in_amount: String,
-    out_amount: String,
-    other_amount_threshold: String,
-    swap_mode: String,
-    slippage_bps: u64,
-    platform_fee: Option<PlatformFee>,
-    price_impact_pct: String,
-    route_plan: Vec<RoutePlanStep>,
-    context_slot: u64,
-    time_taken: f64,
-}
-
-#[derive(Debug, Deserialize, Clone, Serialize)]
-struct PlatformFee {
-    amount: String,
-    fee_bps: u64,
-}
-
-#[derive(Debug, Deserialize, Clone, Serialize)]
-struct RoutePlanStep {
-    swap_info: SwapInfo,
-    percent: u64,
-}
-
-#[derive(Debug, Deserialize, Clone, Serialize)]
-struct SwapInfo {
-    ammKey: String,
-    label: String,
-    input_mint: String,
-    output_mint: String,
-    in_amount: String,
-    out_amount: String,
-    fee_amount: String,
-    fee_mint: String,
-}
-
-#[derive(Debug, Serialize)]
-struct JupiterSwapRequest {
-    user_public_key: String,
-    quote_response: JupiterQuoteResponse,
-}
-
-#[derive(Debug, Deserialize)]
-struct JupiterSwapResponse {
-    swap_transaction: String,
-}
 
 pub struct TradeExecutor {
     rpc_client: RpcClient,
@@ -94,9 +35,10 @@ impl TradeExecutor {
         }
     }
 
-    /// Execute a trade on any pool using Jupiter
+    /// Execute a trade on Meteora
     pub async fn execute_trade(
         &self,
+        pool: &MeteoraPool,
         input_mint: &str,
         output_mint: &str,
         amount_in: u64,
@@ -116,7 +58,7 @@ impl TradeExecutor {
             }
 
             match self
-                .execute_trade_internal(input_mint, output_mint, amount_in, slippage_bps)
+                .execute_trade_internal(pool, input_mint, output_mint, amount_in)
                 .await
             {
                 Ok(sig) => {
@@ -137,15 +79,20 @@ impl TradeExecutor {
 
     async fn execute_trade_internal(
         &self,
+        pool: &MeteoraPool,
         input_mint: &str,
         output_mint: &str,
         amount_in: u64,
-        slippage_bps: u64,
     ) -> Result<Signature> {
-        // 1. Get quote from Jupiter
-        let quote = self
-            .get_jupiter_quote(input_mint, output_mint, amount_in, slippage_bps)
-            .await?;
+        // 1. Get quote from Meteora
+        let quote = meteora::get_meteora_quote(
+            &self.http_client,
+            &pool.pool_address,
+            input_mint,
+            output_mint,
+            amount_in,
+        )
+        .await?;
 
         println!(
             "Got quote: {} -> {} ({} -> {})",
@@ -153,7 +100,12 @@ impl TradeExecutor {
         );
 
         // 2. Get swap transaction
-        let swap_tx = self.get_jupiter_swap_transaction(&quote).await?;
+        let swap_tx = meteora::get_meteora_swap_transaction(
+            &self.http_client,
+            &quote,
+            &self.wallet.pubkey().to_string(),
+        )
+        .await?;
 
         // 3. Deserialize and sign transaction
         let tx: Transaction = bincode::deserialize(&base64::decode(swap_tx)?)?;
@@ -197,49 +149,6 @@ impl TradeExecutor {
             &owner,
             &mint_pubkey,
         ))
-    }
-
-    async fn get_jupiter_quote(
-        &self,
-        input_mint: &str,
-        output_mint: &str,
-        amount: u64,
-        slippage_bps: u64,
-    ) -> Result<JupiterQuoteResponse> {
-        let request = JupiterQuoteRequest {
-            input_mint: input_mint.to_string(),
-            output_mint: output_mint.to_string(),
-            amount: amount.to_string(),
-            slippage_bps,
-        };
-
-        let response = self
-            .http_client
-            .get(JUPITER_QUOTE_API)
-            .query(&request)
-            .send()
-            .await?
-            .error_for_status()?;
-
-        Ok(response.json().await?)
-    }
-
-    async fn get_jupiter_swap_transaction(&self, quote: &JupiterQuoteResponse) -> Result<String> {
-        let request = JupiterSwapRequest {
-            user_public_key: self.wallet.pubkey().to_string(),
-            quote_response: quote.clone(),
-        };
-
-        let response = self
-            .http_client
-            .post(JUPITER_SWAP_API)
-            .json(&request)
-            .send()
-            .await?
-            .error_for_status()?;
-
-        let swap_response: JupiterSwapResponse = response.json().await?;
-        Ok(swap_response.swap_transaction)
     }
 
     /// Simulate a transaction before sending

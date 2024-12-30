@@ -7,8 +7,10 @@ use libcheese::raydium::{fetch_raydium_cheese_pools, fetch_raydium_mint_ids};
 use libcheese::solana::TradeExecutor;
 use reqwest::Client;
 use solana_sdk::signature::Keypair;
+use solana_sdk::signer::keypair::read_keypair_file;
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::str::FromStr;
 use std::time::Duration;
 use tokio::time;
 
@@ -22,9 +24,8 @@ const MIN_PROFIT_USD: f64 = 1.0; // Minimum profit in USD to execute trade
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Run in hot mode (execute trades)
-    #[arg(long)]
-    hot: bool,
+    /// Run mode (hot/cold)
+    mode: String,
 
     /// RPC URL (optional, defaults to mainnet)
     #[arg(long)]
@@ -112,15 +113,15 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // If hot mode, validate keypair
-    let executor = if args.hot {
+    let executor = if args.mode == "hot" {
         if args.keypair.is_none() {
             eprintln!("Error: --keypair is required in hot mode");
             std::process::exit(1);
         }
 
         let keypair_path = args.keypair.unwrap();
-        let keypair_bytes = std::fs::read(&keypair_path)?;
-        let keypair = Keypair::from_bytes(&keypair_bytes)?;
+        let keypair = read_keypair_file(&keypair_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read keypair file: {}", e))?;
 
         let rpc_url = args
             .rpc_url
@@ -136,7 +137,7 @@ async fn main() -> Result<()> {
             eprintln!("Error in iteration: {}", e);
         }
 
-        if !args.hot {
+        if args.mode != "hot" {
             break;
         }
 
@@ -429,6 +430,7 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
                 let amount_in_usdc = (opp.max_trade_size * opp.usdc_price * 1_000_000.0) as u64;
                 let sig1 = executor
                     .execute_trade(
+                        usdc_pool,
                         USDC_MINT,
                         CHEESE_MINT,
                         amount_in_usdc,
@@ -441,6 +443,7 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
                 let amount_in_cheese = (opp.max_trade_size * 1_000_000_000.0) as u64;
                 let sig2 = executor
                     .execute_trade(
+                        pool,
                         CHEESE_MINT,
                         &pool.pool_token_mints[other_ix],
                         amount_in_cheese,
@@ -453,6 +456,7 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
                 let amount_in_target = (opp.other_qty * 0.1 * 1_000_000_000.0) as u64; // 10% of target token liquidity
                 let sig3 = executor
                     .execute_trade(
+                        pool,
                         &pool.pool_token_mints[other_ix],
                         CHEESE_MINT,
                         amount_in_target,
@@ -463,7 +467,7 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
 
                 // 4. CHEESE -> USDC
                 let sig4 = executor
-                    .execute_trade(CHEESE_MINT, USDC_MINT, amount_in_cheese, 50)
+                    .execute_trade(usdc_pool, CHEESE_MINT, USDC_MINT, amount_in_cheese, 50)
                     .await?;
                 println!("4. CHEESE -> USDC: {}", sig4);
             } else {
@@ -472,7 +476,7 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
                 // 1. USDC -> CHEESE on Meteora
                 let amount_in_usdc = (opp.max_trade_size * opp.usdc_price * 1_000_000.0) as u64;
                 let sig1 = executor
-                    .execute_trade(USDC_MINT, CHEESE_MINT, amount_in_usdc, 50)
+                    .execute_trade(usdc_pool, USDC_MINT, CHEESE_MINT, amount_in_usdc, 50)
                     .await?;
                 println!("1. USDC -> CHEESE: {}", sig1);
 
@@ -480,6 +484,7 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
                 let amount_in_cheese = (opp.max_trade_size * 1_000_000_000.0) as u64;
                 let sig2 = executor
                     .execute_trade(
+                        pool,
                         CHEESE_MINT,
                         &pool.pool_token_mints[other_ix],
                         amount_in_cheese,
@@ -492,6 +497,7 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
                 let amount_in_target = (opp.other_qty * 0.1 * 1_000_000_000.0) as u64; // 10% of target token liquidity
                 let sig3 = executor
                     .execute_trade(
+                        pool,
                         &pool.pool_token_mints[other_ix],
                         CHEESE_MINT,
                         amount_in_target,
@@ -502,7 +508,7 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
 
                 // 4. CHEESE -> USDC
                 let sig4 = executor
-                    .execute_trade(CHEESE_MINT, USDC_MINT, amount_in_cheese, 50)
+                    .execute_trade(usdc_pool, CHEESE_MINT, USDC_MINT, amount_in_cheese, 50)
                     .await?;
                 println!("4. CHEESE -> USDC: {}", sig4);
             }
