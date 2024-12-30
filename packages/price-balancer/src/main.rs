@@ -3,7 +3,6 @@ use reqwest::Client;
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
-use update_readme::raydium::fetch_raydium_mint_ids;
 
 /// The Cheese mint on Solana
 const CHEESE_MINT: &str = "A3hzGcTxZNSc7744CWB2LR5Tt9VTtEaQYpP6nwripump";
@@ -117,7 +116,6 @@ async fn main() -> Result<()> {
             all_pools.len()
         );
 
-        // Step 2: compute an implied price for each pool
         // Step 2: compute an implied price for each pool
         let mut pool_prices = Vec::new();
         for p in &all_pools {
