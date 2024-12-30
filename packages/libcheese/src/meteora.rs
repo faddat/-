@@ -75,9 +75,10 @@ pub struct MeteoraPool {
     #[serde(alias = "trading_volume")]
     pub daily_volume: f64,
 
-    // The amounts of each token in the pool, in `pool_token_mints` order
-    #[serde(default)]
     pub pool_token_amounts: Vec<String>,
+
+    #[serde(default)]
+    pub derived: bool,
 }
 
 // -----------------------------------
