@@ -1,12 +1,13 @@
 use anyhow::Result;
+use libcheese::common::parse_other_token_name;
+use libcheese::common::CHEESE_MINT;
+use libcheese::jupiter::fetch_jupiter_prices;
+use libcheese::meteora::fetch_meteora_cheese_pools;
+use libcheese::meteora::MeteoraPool;
+use libcheese::raydium::fetch_raydium_cheese_pools;
+use libcheese::raydium::fetch_raydium_mint_ids;
 use reqwest::Client;
 use std::collections::{HashMap, HashSet};
-use update_readme::common::parse_other_token_name;
-use update_readme::common::CHEESE_MINT;
-use update_readme::jupiter::fetch_jupiter_prices;
-use update_readme::meteora::fetch_meteora_cheese_pools;
-use update_readme::meteora::MeteoraPool;
-use update_readme::raydium::fetch_raydium_mint_ids;
 
 /// Our final table row
 #[derive(Debug)]
@@ -163,8 +164,6 @@ async fn main() -> Result<()> {
             cheese_price: format!("${:.8}", chosen_cheese_price),
         });
     }
-
-    use update_readme::raydium::fetch_raydium_cheese_pools;
 
     // ...
 
