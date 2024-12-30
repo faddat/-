@@ -1,4 +1,4 @@
-use crate::common::{de_string_to_f64, CHEESE_MINT};
+use crate::common::CHEESE_MINT;
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::Deserialize;
