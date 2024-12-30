@@ -40,7 +40,7 @@ pub async fn fetch_meteora_cheese_pools(client: &Client) -> Result<Vec<MeteoraPo
 
         all_pools.extend(parsed.data);
 
-        let fetched_so_far = ((page + 1) * size) as i32;
+        let fetched_so_far = (page + 1) * size;
         if fetched_so_far >= parsed.total_count {
             break;
         }

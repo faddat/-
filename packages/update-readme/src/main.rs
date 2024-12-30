@@ -1,16 +1,12 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use reqwest::Client;
-use serde::de::{self, Deserializer};
-use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use tokio::time::{sleep, Duration};
 use update_readme::common::parse_other_token_name;
-use update_readme::common::{de_string_to_f64, CHEESE_MINT};
+use update_readme::common::CHEESE_MINT;
 use update_readme::jupiter::fetch_jupiter_prices;
 use update_readme::meteora::fetch_meteora_cheese_pools;
 use update_readme::meteora::MeteoraPool;
 use update_readme::raydium::fetch_raydium_mint_ids;
-use update_readme::raydium::{fetch_raydium_cheese_pools, RaydiumPoolDetailed};
 
 /// Our final table row
 #[derive(Debug)]
@@ -155,7 +151,7 @@ async fn main() -> Result<()> {
 
         final_pools.push(DisplayPool {
             source: "Meteora".to_string(),
-            other_mint: other_mint,
+            other_mint,
             other_symbol,
             cheese_qty: format!("{:.2}", cheese_amt_f64),
             other_qty: format!("{:.2}", other_amt_f64),
@@ -168,7 +164,7 @@ async fn main() -> Result<()> {
         });
     }
 
-    use update_readme::raydium::{fetch_raydium_cheese_pools, RaydiumPoolDetailed};
+    use update_readme::raydium::fetch_raydium_cheese_pools;
 
     // ...
 
