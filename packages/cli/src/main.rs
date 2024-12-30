@@ -235,11 +235,11 @@ async fn main() -> Result<()> {
             cheese_qty: format!("{:.2}", cheese_amt_f64),
             other_qty: format!("{:.2}", other_amt_f64),
             pool_type: pool.pool_type.clone(),
-            tvl: format!("{:.2}", pool_tvl),
-            volume_usd: format!("{:.2}", pool.daily_volume),
+            tvl: format!("{:.10}", pool_tvl),
+            volume_usd: format!("{:.10}", pool.daily_volume),
             fee: pool.total_fee_pct.clone(),
             pool_address: pool.pool_address.clone(),
-            cheese_price: format!("${:.6}", chosen_cheese_price),
+            cheese_price: format!("${:.10}", chosen_cheese_price),
         });
     }
 
@@ -344,11 +344,11 @@ async fn main() -> Result<()> {
             cheese_qty: format!("{:.2}", cheese_amt),
             other_qty: format!("{:.2}", other_amt),
             pool_type: rp.r#type.clone(),
-            tvl: format!("{:.2}", pool_tvl),
-            volume_usd: format!("{:.2}", rp.day.volume),
+            tvl: format!("{:.10}", pool_tvl),
+            volume_usd: format!("{:.10}", rp.day.volume),
             fee: format!("{:.2}", rp.feeRate * 100.0),
             pool_address: rp.pool_id.clone(),
-            cheese_price: format!("${:.8}", chosen_cheese_price),
+            cheese_price: format!("${:.10}", chosen_cheese_price),
         });
     }
 
@@ -387,250 +387,159 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// After we've built `final_pools`, we look for price differences and calculate equalization value
+/// After we've built `final_pools`, we look for price differences between Meteora pools
 fn display_arbitrage_opportunities(pools: &[DisplayPool], jup_prices: &HashMap<String, f64>) {
-    // Build trading graph
-    let mut edges: Vec<PoolEdge> = Vec::new();
-    let mut token_symbols = HashMap::new();
+    // Filter to only Meteora pools
+    let meteora_pools: Vec<&DisplayPool> = pools.iter().filter(|p| p.source == "Meteora").collect();
 
-    // Convert DisplayPools into PoolEdges
-    for pool in pools {
-        let fee = pool.fee.trim_end_matches('%').parse::<f64>().unwrap_or(0.0) / 100.0;
-        let tvl = pool.tvl.parse::<f64>().unwrap_or(0.0);
-        let cheese_qty = pool.cheese_qty.parse::<f64>().unwrap_or(0.0);
-        let other_qty = pool.other_qty.parse::<f64>().unwrap_or(0.0);
-
-        // Store symbol mapping
-        token_symbols.insert(pool.other_mint.clone(), pool.other_symbol.clone());
-        token_symbols.insert(CHEESE_MINT.to_string(), "🧀".to_string());
-
-        // Create bidirectional edges for both CHEESE and the other token
-        edges.push(PoolEdge {
-            pool_address: pool.pool_address.clone(),
-            source: pool.source.clone(),
-            token_a: CHEESE_MINT.to_string(),
-            token_b: pool.other_mint.clone(),
-            fee,
-            tvl,
-            reserves_a: cheese_qty,
-            reserves_b: other_qty,
-        });
-
-        edges.push(PoolEdge {
-            pool_address: pool.pool_address.clone(),
-            source: pool.source.clone(),
-            token_a: pool.other_mint.clone(),
-            token_b: CHEESE_MINT.to_string(),
-            fee,
-            tvl,
-            reserves_a: other_qty,
-            reserves_b: cheese_qty,
-        });
-    }
-
-    // Get CHEESE/USDC price from the first pool (assuming it's set correctly)
-    let cheese_usdc_price = pools
-        .first()
-        .map(|p| {
-            p.cheese_price
-                .trim_start_matches('$')
-                .parse::<f64>()
-                .unwrap_or(0.0)
-        })
+    // Get CHEESE/USDC price from the USDC/CHEESE pool for reference
+    let usdc_pool = pools
+        .iter()
+        .find(|p| p.pool_address == "2rkTh46zo8wUvPJvACPTJ16RNUHEM9EZ1nLYkUxZEHkw")
+        .expect("USDC pool not found");
+    let cheese_usdc_price = usdc_pool
+        .cheese_price
+        .trim_start_matches('$')
+        .parse::<f64>()
         .unwrap_or(0.0);
 
-    // Build a map of derived prices from CHEESE pools
-    let mut derived_prices = HashMap::new();
-    for pool in pools {
+    // Get SOL price for fee calculation
+    let sol_price = jup_prices
+        .get("So11111111111111111111111111111111111111112")
+        .copied()
+        .unwrap_or(0.0);
+
+    println!("\n=== Meteora Pool Arbitrage Analysis ===");
+    println!("Reference CHEESE/USDC price: ${:.10}", cheese_usdc_price);
+    println!("SOL price: ${:.2}", sol_price);
+    println!(
+        "Transaction cost: ${:.4} ({}◎ per tx)\n",
+        SOL_PER_TX * sol_price,
+        SOL_PER_TX
+    );
+
+    // Calculate implied CHEESE prices from each pool
+    let mut pool_prices: Vec<(String, String, f64, f64, f64, f64)> = Vec::new();
+    // (pool_addr, symbol, cheese_qty, other_qty, implied_price, fee_percent)
+
+    for pool in &meteora_pools {
         let cheese_qty = pool.cheese_qty.parse::<f64>().unwrap_or(0.0);
         let other_qty = pool.other_qty.parse::<f64>().unwrap_or(0.0);
+        let fee_percent = pool.fee.trim_end_matches('%').parse::<f64>().unwrap_or(0.0) / 100.0;
 
-        if cheese_qty > 0.0 && other_qty > 0.0 {
-            let derived_price = (cheese_qty * cheese_usdc_price) / other_qty;
-            derived_prices.insert(pool.other_mint.clone(), derived_price);
-        }
-    }
-
-    // Debug print all prices
-    println!("\n=== Token Prices ===");
-    for (mint, price) in jup_prices.iter() {
-        if let Some(symbol) = token_symbols.get(mint) {
-            println!("{}: ${:.6} (Jupiter)", symbol, price);
-        }
-    }
-    for (mint, price) in derived_prices.iter() {
-        if let Some(symbol) = token_symbols.get(mint) {
-            if !jup_prices.contains_key(mint) {
-                println!("{}: ${:.6} (Derived from 🧀)", symbol, price);
-            }
-        }
-    }
-    println!("==================\n");
-
-    println!("\n=== Potential Arbitrage Opportunities ===");
-
-    // Find cycles starting from each token
-    let mut all_cycles = Vec::new();
-
-    for edge in &edges {
-        let mut visited = HashSet::new();
-        let mut current_path = Vec::new();
-
-        if edge.tvl >= 10.0 {
-            // Only start from pools with sufficient TVL
-            dfs_find_cycles(
-                edge,
-                &edges,
-                &mut visited,
-                &mut current_path,
-                &mut all_cycles,
-                0,
-                if edge.token_a == CHEESE_MINT {
-                    WALLET_CHEESE_BALANCE / 10.0
-                } else {
-                    edge.reserves_a / 10.0
-                },
-                cheese_usdc_price,
-                jup_prices,
-            );
-        }
-    }
-
-    if all_cycles.is_empty() {
-        println!("No profitable cycles found");
-        return;
-    }
-
-    // Sort cycles by USDC profit
-    all_cycles.sort_by(|a, b| {
-        let profit_a = a.final_usdc_value - a.initial_usdc_value - a.fees_usdc_value;
-        let profit_b = b.final_usdc_value - b.initial_usdc_value - b.fees_usdc_value;
-        profit_b
-            .partial_cmp(&profit_a)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    for cycle in all_cycles {
-        let profit_cheese = cycle.final_cheese - cycle.initial_cheese;
-        let profit_usdc = cycle.final_usdc_value - cycle.initial_usdc_value - cycle.fees_usdc_value;
-
-        if profit_usdc <= 1.0 {
-            // Skip opportunities less than $1
+        if cheese_qty <= 0.0 || other_qty <= 0.0 {
             continue;
         }
 
-        // Get the starting token info
-        let first_step = &cycle.steps[0];
-        let start_token = token_symbols
-            .get(&first_step.sell_token)
-            .cloned()
-            .unwrap_or_else(|| {
-                first_step
-                    .sell_token
-                    .chars()
-                    .rev()
-                    .take(4)
-                    .collect::<String>()
-                    .chars()
-                    .rev()
-                    .collect()
-            });
+        // Get the other token's price, either from Jupiter or derive it
+        let other_price = if let Some(&price) = jup_prices.get(&pool.other_mint) {
+            price
+        } else {
+            // If we don't have a Jupiter price, derive it from the USDC pool ratio
+            (cheese_qty * cheese_usdc_price) / other_qty
+        };
 
-        println!("\n🔄 Arbitrage Cycle (Profit: ${:.2})", profit_usdc);
+        // Calculate implied CHEESE price from this pool
+        let implied_cheese_price = (other_qty * other_price) / cheese_qty;
 
-        // Show starting amount in original token and USD
-        println!(
-            "├─ Start with: {:.4} {} (${:.2})",
-            first_step.amount_in, start_token, cycle.initial_usdc_value
-        );
+        pool_prices.push((
+            pool.pool_address.clone(),
+            pool.other_symbol.clone(),
+            cheese_qty,
+            other_qty,
+            implied_cheese_price,
+            fee_percent,
+        ));
+    }
 
-        for (i, step) in cycle.steps.iter().enumerate() {
-            let token_a = token_symbols
-                .get(&step.sell_token)
-                .cloned()
-                .unwrap_or_else(|| {
-                    step.sell_token
-                        .chars()
-                        .rev()
-                        .take(4)
-                        .collect::<String>()
-                        .chars()
-                        .rev()
-                        .collect()
-                });
+    // Sort by price difference from USDC pool
+    pool_prices.sort_by(|a, b| {
+        let diff_a = (a.4 - cheese_usdc_price).abs();
+        let diff_b = (b.4 - cheese_usdc_price).abs();
+        diff_b
+            .partial_cmp(&diff_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-            let token_b = token_symbols
-                .get(&step.buy_token)
-                .cloned()
-                .unwrap_or_else(|| {
-                    step.buy_token
-                        .chars()
-                        .rev()
-                        .take(4)
-                        .collect::<String>()
-                        .chars()
-                        .rev()
-                        .collect()
-                });
+    println!("\nPotential Arbitrage Opportunities (sorted by price difference):");
+    println!("Reference USDC pool price: ${:.10}\n", cheese_usdc_price);
 
-            // Calculate USD values for this step
-            let amount_in_usd = if step.sell_token == CHEESE_MINT {
-                step.amount_in * cheese_usdc_price
+    // Get USDC pool fee
+    let usdc_pool_fee = usdc_pool
+        .fee
+        .trim_end_matches('%')
+        .parse::<f64>()
+        .unwrap_or(0.0)
+        / 100.0;
+
+    for (pool_addr, symbol, cheese_qty, other_qty, implied_price, pool_fee) in &pool_prices {
+        let price_diff_pct = ((implied_price - cheese_usdc_price) / cheese_usdc_price) * 100.0;
+
+        // Only show opportunities with >1% difference
+        if price_diff_pct.abs() > 1.0 {
+            // Calculate total transaction costs
+            let tx_cost_usd = 2.0 * SOL_PER_TX * sol_price; // Two transactions needed
+
+            // Calculate optimal trade size considering fees and slippage
+            let max_trade_size = if implied_price > &cheese_usdc_price {
+                // Selling CHEESE in this pool
+                cheese_qty * 0.1 // Limit to 10% of pool liquidity
             } else {
-                step.amount_in
-                    * jup_prices
-                        .get(&step.sell_token)
-                        .or_else(|| derived_prices.get(&step.sell_token))
-                        .unwrap_or(&0.0)
+                // Buying CHEESE from this pool
+                cheese_qty * 0.1
             };
 
-            let amount_out_usd = if step.buy_token == CHEESE_MINT {
-                step.expected_out * cheese_usdc_price
-            } else {
-                step.expected_out
-                    * jup_prices
-                        .get(&step.buy_token)
-                        .or_else(|| derived_prices.get(&step.buy_token))
-                        .unwrap_or(&0.0)
-            };
+            // Calculate total fees for the trade
+            let pool1_fee_usd = max_trade_size * cheese_usdc_price * usdc_pool_fee;
+            let pool2_fee_usd = max_trade_size * implied_price * pool_fee;
+            let total_fees_usd = tx_cost_usd + pool1_fee_usd + pool2_fee_usd;
 
-            println!("├─ Step {}: {} → {}", i + 1, token_a, token_b);
-            println!("│  ├─ Pool: {} ({})", step.pool_address, step.source);
-            println!(
-                "│  ├─ Amount In:  {:.4} {} (${:.2})",
-                step.amount_in, token_a, amount_in_usd
-            );
-            println!(
-                "│  ├─ Amount Out: {:.4} {} (${:.2})",
-                step.expected_out, token_b, amount_out_usd
-            );
-            println!("│  └─ Fee: {:.2}%", step.fee_percent * 100.0);
+            // Calculate expected profit
+            let price_diff_per_cheese = (implied_price - cheese_usdc_price).abs();
+            let gross_profit = max_trade_size * price_diff_per_cheese;
+            let net_profit = gross_profit - total_fees_usd;
+
+            if net_profit > 0.0 {
+                println!("Pool: {} ({})", pool_addr, symbol);
+                println!("├─ Implied CHEESE price: ${:.10}", implied_price);
+                println!("├─ Price difference: {:.2}%", price_diff_pct);
+                println!("├─ Pool liquidity:");
+                println!("│  ├─ 🧀: {:.2}", cheese_qty);
+                println!("│  └─ {}: {:.2}", symbol, other_qty);
+                println!("├─ Fees:");
+                println!("│  ├─ Pool 1 (USDC) fee: {:.2}%", usdc_pool_fee * 100.0);
+                println!("│  ├─ Pool 2 fee: {:.2}%", pool_fee * 100.0);
+                println!("│  └─ Transaction cost: ${:.4}", tx_cost_usd);
+
+                if implied_price > &cheese_usdc_price {
+                    println!("├─ Arbitrage strategy (SELL in this pool):");
+                    println!(
+                        "│  1. Buy {:.2} CHEESE from USDC pool at ${:.10}",
+                        max_trade_size, cheese_usdc_price
+                    );
+                    println!("│  2. Sell in this pool at ${:.10}", implied_price);
+                } else {
+                    println!("├─ Arbitrage strategy (BUY from this pool):");
+                    println!(
+                        "│  1. Buy {:.2} CHEESE from this pool at ${:.10}",
+                        max_trade_size, implied_price
+                    );
+                    println!("│  2. Sell in USDC pool at ${:.10}", cheese_usdc_price);
+                }
+
+                println!("└─ Profitability:");
+                println!("   ├─ Gross profit: ${:.4}", gross_profit);
+                println!("   ├─ Total fees: ${:.4}", total_fees_usd);
+                println!("   └─ Net profit: ${:.4}\n", net_profit);
+            }
         }
-
-        println!(
-            "├─ End with: {:.4} 🧀 (${:.2})",
-            cycle.final_cheese, cycle.final_usdc_value
-        );
-        println!(
-            "├─ Transaction Cost: {:.6} SOL = ${:.2}",
-            cycle.total_fees_sol, cycle.fees_usdc_value
-        );
-        println!(
-            "├─ Total Pool Fees: {:.2}%",
-            cycle.pool_fees_paid.iter().sum::<f64>() * 100.0
-        );
-        println!(
-            "└─ Net Profit: ${:.2} ({:.2}%)",
-            profit_usdc,
-            (profit_usdc / cycle.initial_usdc_value) * 100.0
-        );
     }
 }
 
 fn find_arbitrage_cycles(
     edges: &[PoolEdge],
     cheese_usdc_price: f64,
-    jup_prices: &HashMap<String, f64>,
+    token_prices: &HashMap<String, (f64, String)>,
 ) -> Vec<ArbitrageCycle> {
     let mut cycles = Vec::new();
     let mut visited = HashSet::new();
@@ -648,9 +557,9 @@ fn find_arbitrage_cycles(
                 &mut current_path,
                 &mut cycles,
                 0,
-                WALLET_CHEESE_BALANCE / 10.0, // Start with 10% of our CHEESE
+                WALLET_CHEESE_BALANCE / 10.0,
                 cheese_usdc_price,
-                jup_prices,
+                token_prices,
             );
         }
     }
@@ -667,7 +576,7 @@ fn dfs_find_cycles(
     depth: usize,
     amount_in: f64,
     cheese_usdc_price: f64,
-    jup_prices: &HashMap<String, f64>,
+    token_prices: &HashMap<String, (f64, String)>,
 ) {
     if depth >= 4 {
         return; // Limit cycle length
@@ -703,6 +612,40 @@ fn dfs_find_cycles(
         return;
     }
 
+    // Skip if amounts don't match between steps
+    if !path.is_empty() {
+        let prev_step = &path[path.len() - 1];
+        if (prev_step.expected_out - amount_in).abs() > 0.000001 * prev_step.expected_out {
+            return;
+        }
+    }
+
+    // Calculate USD values for validation
+    let amount_in_usd = if current.token_a == CHEESE_MINT {
+        amount_in * cheese_usdc_price
+    } else {
+        amount_in
+            * token_prices
+                .get(&current.token_a)
+                .map(|(price, _)| *price)
+                .unwrap_or(0.0)
+    };
+
+    let amount_out_usd = if current.token_b == CHEESE_MINT {
+        expected_out * cheese_usdc_price
+    } else {
+        expected_out
+            * token_prices
+                .get(&current.token_b)
+                .map(|(price, _)| *price)
+                .unwrap_or(0.0)
+    };
+
+    // Skip if USD values don't make sense (accounting for fees)
+    if amount_out_usd < amount_in_usd * (1.0 - fee * 2.0) {
+        return;
+    }
+
     // Add current step
     path.push(TradeStep {
         pool_address: current.pool_address.clone(),
@@ -718,44 +661,68 @@ fn dfs_find_cycles(
 
     // If we're back to CHEESE and have made at least 2 trades, we found a cycle
     if depth > 0 && current.token_b == CHEESE_MINT {
+        // Verify the entire cycle
+        let mut valid = true;
+        let mut current_amount = path[0].amount_in;
+        for step in path.iter() {
+            if (step.amount_in - current_amount).abs() > 0.000001 * current_amount {
+                valid = false;
+                break;
+            }
+            current_amount = step.expected_out;
+        }
+
+        if !valid {
+            path.pop();
+            visited.remove(&current.pool_address);
+            return;
+        }
+
         let total_fees_sol = path.len() as f64 * SOL_PER_TX;
         let pool_fees: Vec<f64> = path.iter().map(|step| step.fee_percent).collect();
 
-        // Calculate USDC values
+        // Calculate USDC values using token prices
         let initial_usdc_value = if path[0].sell_token == CHEESE_MINT {
             path[0].amount_in * cheese_usdc_price
         } else {
-            path[0].amount_in * jup_prices.get(&path[0].sell_token).unwrap_or(&0.0)
+            path[0].amount_in
+                * token_prices
+                    .get(&path[0].sell_token)
+                    .map(|(price, _)| *price)
+                    .unwrap_or(0.0)
         };
 
         let final_usdc_value = expected_out * cheese_usdc_price;
 
         // Calculate fees in USDC
-        let sol_price = jup_prices
+        let sol_price = token_prices
             .get("So11111111111111111111111111111111111111112")
-            .unwrap_or(&0.0);
+            .map(|(price, _)| *price)
+            .unwrap_or(0.0);
         let fees_usdc_value = total_fees_sol * sol_price;
 
         // Calculate pool fees in USDC
         let pool_fees_usdc: f64 = path
             .iter()
-            .enumerate()
-            .map(|(i, step)| {
-                let amount_value = if step.sell_token == CHEESE_MINT {
+            .map(|step| {
+                let step_amount_usd = if step.sell_token == CHEESE_MINT {
                     step.amount_in * cheese_usdc_price
                 } else {
-                    step.amount_in * jup_prices.get(&step.sell_token).unwrap_or(&0.0)
+                    step.amount_in
+                        * token_prices
+                            .get(&step.sell_token)
+                            .map(|(price, _)| *price)
+                            .unwrap_or(0.0)
                 };
-                amount_value * step.fee_percent
+                step_amount_usd * step.fee_percent
             })
             .sum();
 
         let total_fees_usdc = fees_usdc_value + pool_fees_usdc;
-
-        // Only add cycle if profit is significant (more than fees)
         let profit_usdc = final_usdc_value - initial_usdc_value - total_fees_usdc;
+
+        // Only add cycle if profit is significant
         if profit_usdc > 1.0 {
-            // Only show opportunities > $1
             cycles.push(ArbitrageCycle {
                 steps: path.clone(),
                 initial_cheese: amount_in,
@@ -783,7 +750,7 @@ fn dfs_find_cycles(
                     depth + 1,
                     expected_out,
                     cheese_usdc_price,
-                    jup_prices,
+                    token_prices,
                 );
             }
         }
@@ -796,7 +763,7 @@ fn dfs_find_cycles(
 /// Print table
 fn print_table(pools: &[DisplayPool]) {
     println!(
-        "| {:<8} | {:<44} | {:<10} | {:>10} | {:>10} | {:<10} | {:>12} | {:>12} | {:>5} | {:>11} | {:<44} |",
+        "| {:<8} | {:<44} | {:<10} | {:>10} | {:>10} | {:<10} | {:>20} | {:>20} | {:>5} | {:>19} | {:<44} |",
         "Source",
         "Other Mint",
         "Symbol",
@@ -817,16 +784,16 @@ fn print_table(pools: &[DisplayPool]) {
         "-".repeat(10),
         "-".repeat(10),
         "-".repeat(10),
-        "-".repeat(12),
-        "-".repeat(12),
+        "-".repeat(20),
+        "-".repeat(20),
         "-".repeat(5),
-        "-".repeat(11),
+        "-".repeat(19),
         "-".repeat(44),
     );
 
     for dp in pools {
         println!(
-            "| {:<8} | {:<44} | {:<10} | {:>10} | {:>10} | {:<10} | {:>12} | {:>12} | {:>5} | {:>11} | {:<44} |",
+            "| {:<8} | {:<44} | {:<10} | {:>10} | {:>10} | {:<10} | {:>20} | {:>20} | {:>5} | {:>19} | {:<44} |",
             dp.source,
             truncate(&dp.other_mint, 44),
             truncate(&dp.other_symbol, 10),
