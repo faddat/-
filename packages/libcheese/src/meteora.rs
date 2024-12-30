@@ -174,6 +174,9 @@ pub async fn get_meteora_swap_transaction(
         quote_response: quote.clone(),
     };
 
+    // Log the swap request
+    println!("Sending Meteora swap request: {:?}", swap_request);
+
     let resp = client.post(&swap_url).json(&swap_request).send().await?;
 
     if !resp.status().is_success() {
