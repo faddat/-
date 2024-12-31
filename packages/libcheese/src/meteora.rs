@@ -2,6 +2,8 @@ use crate::common::{de_string_to_f64, CHEESE_MINT};
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use solana_sdk::pubkey::Pubkey;
 
 // -----------------------------------
 // Networking
@@ -63,7 +65,17 @@ pub struct MeteoraPool {
     pub pool_type: String,
     pub total_fee_pct: String,
 
-    // For demonstration, we won't read these
+    // Add these new fields for swap accounts
+    pub a_vault: String,
+    pub b_vault: String,
+    pub a_token_vault: String,
+    pub b_token_vault: String,
+    pub a_vault_lp_mint: String,
+    pub b_vault_lp_mint: String,
+    pub a_vault_lp: String,
+    pub b_vault_lp: String,
+    pub protocol_token_fee: String,
+
     #[allow(dead_code)]
     unknown: bool,
     #[allow(dead_code)]
@@ -79,6 +91,18 @@ pub struct MeteoraPool {
 
     #[serde(default)]
     pub derived: bool,
+}
+
+// Add helper methods to MeteoraPool
+impl MeteoraPool {
+    pub fn get_vault_program(&self) -> Result<Pubkey> {
+        // This is Meteora's vault program ID
+        Ok("24Uqj9JCLxUeoC3hGfh5W3s9FM9uCHDS2SG3LYwBpyTi".parse()?)
+    }
+
+    pub fn get_token_program(&self) -> Pubkey {
+        spl_token::ID
+    }
 }
 
 // -----------------------------------
@@ -161,26 +185,94 @@ async fn fetch_pool_state(client: &Client, pool_address: &str) -> Result<Meteora
         .ok_or_else(|| anyhow!("Pool not found: {}", pool_address))
 }
 
+// Add these new structs to help with swap account setup
+#[derive(Debug)]
+pub struct MeteoraSwapAccounts {
+    pub pool: Pubkey,
+    pub user_source_token: Pubkey,
+    pub user_destination_token: Pubkey,
+    pub a_vault: Pubkey,
+    pub b_vault: Pubkey,
+    pub a_token_vault: Pubkey,
+    pub b_token_vault: Pubkey,
+    pub a_vault_lp_mint: Pubkey,
+    pub b_vault_lp_mint: Pubkey,
+    pub a_vault_lp: Pubkey,
+    pub b_vault_lp: Pubkey,
+    pub protocol_token_fee: Pubkey,
+}
+
+impl MeteoraPool {
+    // Add this helper method to get swap accounts
+    pub async fn get_swap_accounts(
+        &self,
+        user_source_token: Pubkey,
+        user_dest_token: Pubkey,
+    ) -> Result<MeteoraSwapAccounts> {
+        // Parse pool data to get required accounts
+        Ok(MeteoraSwapAccounts {
+            pool: self.pool_address.parse()?,
+            user_source_token,
+            user_destination_token: user_dest_token,
+            a_vault: self.a_vault.parse()?,
+            b_vault: self.b_vault.parse()?,
+            a_token_vault: self.a_token_vault.parse()?,
+            b_token_vault: self.b_token_vault.parse()?,
+            a_vault_lp_mint: self.a_vault_lp_mint.parse()?,
+            b_vault_lp_mint: self.b_vault_lp_mint.parse()?,
+            a_vault_lp: self.a_vault_lp.parse()?,
+            b_vault_lp: self.b_vault_lp.parse()?,
+            protocol_token_fee: self.protocol_token_fee.parse()?,
+        })
+    }
+}
+
+// Update get_meteora_swap_transaction to use proper accounts
 pub async fn get_meteora_swap_transaction(
     client: &Client,
     quote: &MeteoraQuoteResponse,
     user_pubkey: &str,
+    swap_accounts: &MeteoraSwapAccounts,
 ) -> Result<String> {
-    let base_url = "https://amm-v2.meteora.ag";
-    let swap_url = format!("{}/swap", base_url);
+    let swap_url = "https://amm-v2.meteora.ag/swap";
 
-    let swap_request = MeteoraSwapRequest {
-        user_public_key: user_pubkey.to_string(),
-        quote_response: quote.clone(),
-    };
+    let swap_request = json!({
+        "user_public_key": user_pubkey,
+        "quote_response": quote,
+        "accounts": {
+            "pool": swap_accounts.pool.to_string(),
+            "userSourceToken": swap_accounts.user_source_token.to_string(),
+            "userDestinationToken": swap_accounts.user_destination_token.to_string(),
+            "aVault": swap_accounts.a_vault.to_string(),
+            "bVault": swap_accounts.b_vault.to_string(),
+            "aTokenVault": swap_accounts.a_token_vault.to_string(),
+            "bTokenVault": swap_accounts.b_token_vault.to_string(),
+            "aVaultLpMint": swap_accounts.a_vault_lp_mint.to_string(),
+            "bVaultLpMint": swap_accounts.b_vault_lp_mint.to_string(),
+            "aVaultLp": swap_accounts.a_vault_lp.to_string(),
+            "bVaultLp": swap_accounts.b_vault_lp.to_string(),
+            "protocolTokenFee": swap_accounts.protocol_token_fee.to_string(),
+            "user": user_pubkey,
+            "vaultProgram": "24Uqj9JCLxUeoC3hGfh5W3s9FM9uCHDS2SG3LYwBpyTi",
+            "tokenProgram": spl_token::ID.to_string()
+        }
+    });
 
-    // Log the swap request
-    println!("Sending Meteora swap request: {:?}", swap_request);
+    println!(
+        "Sending swap request: {}",
+        serde_json::to_string_pretty(&swap_request)?
+    );
 
-    let resp = client.post(&swap_url).json(&swap_request).send().await?;
+    let resp = client.post(swap_url).json(&swap_request).send().await?;
 
     if !resp.status().is_success() {
-        return Err(anyhow!("Meteora swap request failed: {}", resp.status()));
+        let status = resp.status();
+        let error_text = resp.text().await?;
+        return Err(anyhow!(
+            "Meteora swap request failed: {} - {}",
+            status,
+            error_text
+        ));
     }
 
     let swap: MeteoraSwapResponse = resp.json().await?;

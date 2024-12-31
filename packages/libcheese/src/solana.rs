@@ -86,6 +86,12 @@ impl TradeExecutor {
         output_mint: &str,
         amount_in: u64,
     ) -> Result<Signature> {
+        // Get source and destination token accounts
+        let source_token =
+            get_associated_token_address(&self.wallet.pubkey(), &Pubkey::from_str(input_mint)?);
+        let dest_token =
+            get_associated_token_address(&self.wallet.pubkey(), &Pubkey::from_str(output_mint)?);
+
         // 1. Get quote from Meteora
         let quote = meteora::get_meteora_quote(
             &self.http_client,
@@ -96,20 +102,19 @@ impl TradeExecutor {
         )
         .await?;
 
-        println!(
-            "Got quote: {} -> {} ({} -> {})",
-            input_mint, output_mint, quote.in_amount, quote.out_amount
-        );
+        // 2. Get swap accounts
+        let swap_accounts = pool.get_swap_accounts(source_token, dest_token).await?;
 
-        // 2. Get swap transaction
+        // 3. Get swap transaction
         let swap_tx = meteora::get_meteora_swap_transaction(
             &self.http_client,
             &quote,
             &self.wallet.pubkey().to_string(),
+            &swap_accounts,
         )
         .await?;
 
-        // 3. Deserialize and sign transaction
+        // 4. Deserialize and sign transaction
         let mut tx: Transaction = bincode::deserialize(&base64::decode(swap_tx)?)?;
 
         // Verify and update blockhash if needed
@@ -123,7 +128,7 @@ impl TradeExecutor {
             tx.sign(&[&self.wallet], tx.message.recent_blockhash);
         }
 
-        // 4. Simulate transaction with detailed error reporting
+        // 5. Simulate transaction with detailed error reporting
         match self.simulate_transaction(&tx).await {
             Ok(_) => println!("Transaction simulation successful"),
             Err(e) => {
@@ -132,7 +137,7 @@ impl TradeExecutor {
             }
         }
 
-        // 5. Send and confirm transaction
+        // 6. Send and confirm transaction
         self.send_and_confirm_transaction(&tx).await
     }
 
