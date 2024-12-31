@@ -1,6 +1,3 @@
-
-
-
 [workspace]
-members = ["packages/update-readme", "packages/price-balancer"]
+members = ["packages/cli", "packages/libcheese"]
 resolver = "2"

@@ -1,4 +1,6 @@
 /target**
 /packages/update-readme/target**
-
+**seedphrase
+**/target
+**keypair.json
 
