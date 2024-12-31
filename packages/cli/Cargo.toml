@@ -11,8 +11,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 libcheese = { path = "../libcheese" }
-clap = { version = "4.4", features = ["derive"] }
-solana-sdk = "2.1.7"
+clap = { version = "4.4", features = ["derive", "env"] }
+solana-sdk = "2.1.0"
+solana-client = "2.1.0"
+solana-zk-sdk = "2.1.0"
+
 
 [[bin]]
 name = "cheese"

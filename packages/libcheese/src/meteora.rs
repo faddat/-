@@ -1,7 +1,13 @@
 use crate::common::{de_string_to_f64, CHEESE_MINT};
+use anchor_lang::{AnchorSerialize, InstructionData, ToAccountMetas};
+use anchor_spl::associated_token::get_associated_token_address;
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use solana_sdk::{
+    account_meta::AccountMeta, compute_budget::ComputeBudgetInstruction, instruction::Instruction,
+    pubkey::Pubkey, transaction::Transaction,
+};
 
 // -----------------------------------
 // Networking
@@ -102,6 +108,7 @@ pub async fn get_meteora_quote(
     amount_in: u64,
 ) -> Result<MeteoraQuoteResponse> {
     // Get current pool state
+    println!("Fetching pool state for {}", pool_address);
     let pool = fetch_pool_state(client, pool_address).await?;
 
     // Find the indices for input and output tokens
@@ -110,6 +117,11 @@ pub async fn get_meteora_quote(
     } else {
         (1, 0)
     };
+
+    println!(
+        "Pool state: in_idx={}, out_idx={}, amounts={:?}",
+        in_idx, out_idx, pool.pool_token_amounts
+    );
 
     // Parse pool amounts
     let in_amount_pool: f64 = pool.pool_token_amounts[in_idx].parse()?;
@@ -129,7 +141,7 @@ pub async fn get_meteora_quote(
     let price_after = (out_amount_pool - amount_out) / (in_amount_pool + amount_in as f64);
     let price_impact = ((price_before - price_after) / price_before * 100.0).to_string();
 
-    Ok(MeteoraQuoteResponse {
+    let quote = MeteoraQuoteResponse {
         pool_address: pool_address.to_string(),
         input_mint: input_mint.to_string(),
         output_mint: output_mint.to_string(),
@@ -137,7 +149,10 @@ pub async fn get_meteora_quote(
         out_amount: amount_out.to_string(),
         fee_amount: fee_amount.to_string(),
         price_impact,
-    })
+    };
+
+    println!("Generated quote: {:?}", quote);
+    Ok(quote)
 }
 
 async fn fetch_pool_state(client: &Client, pool_address: &str) -> Result<MeteoraPool> {
@@ -174,16 +189,25 @@ pub async fn get_meteora_swap_transaction(
         quote_response: quote.clone(),
     };
 
-    // Log the swap request
-    println!("Sending Meteora swap request: {:?}", swap_request);
+    println!("Sending swap request to {}: {:?}", swap_url, swap_request);
 
     let resp = client.post(&swap_url).json(&swap_request).send().await?;
 
     if !resp.status().is_success() {
-        return Err(anyhow!("Meteora swap request failed: {}", resp.status()));
+        let status = resp.status();
+        let error_text = resp.text().await?;
+        return Err(anyhow!(
+            "Meteora swap request failed: {} - {}",
+            status,
+            error_text
+        ));
     }
 
     let swap: MeteoraSwapResponse = resp.json().await?;
+    println!(
+        "Received swap transaction (length={})",
+        swap.transaction.len()
+    );
     Ok(swap.transaction)
 }
 
@@ -207,4 +231,81 @@ struct MeteoraSwapRequest {
 #[derive(Debug, Deserialize)]
 struct MeteoraSwapResponse {
     transaction: String,
+}
+
+pub async fn build_meteora_swap_transaction(
+    pool: &MeteoraPool,
+    user_pubkey: &Pubkey,
+    source_token: &Pubkey,
+    in_amount: u64,
+    minimum_out_amount: u64,
+) -> Result<Transaction> {
+    let mut instructions = vec![
+        // Set compute budget
+        ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
+        ComputeBudgetInstruction::set_compute_unit_price(1),
+    ];
+
+    // Add the swap instruction
+    instructions.push(Instruction {
+        program_id: prog_dynamic_amm::ID,
+        accounts: build_swap_accounts(pool, user_pubkey, source_token)?,
+        data: build_swap_data(in_amount, minimum_out_amount)?,
+    });
+
+    Ok(Transaction::new_with_payer(
+        &instructions,
+        Some(user_pubkey),
+    ))
+}
+
+pub mod meteora_program {
+    use solana_sdk::declare_id;
+    declare_id!("M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K");
+}
+
+#[derive(AnchorSerialize)]
+struct SwapInstructionData {
+    in_amount: u64,
+    minimum_out_amount: u64,
+}
+
+fn build_swap_accounts(
+    pool: &MeteoraPool,
+    user: &Pubkey,
+    source_token: &Pubkey,
+) -> Result<Vec<AccountMeta>> {
+    let pool_pubkey = Pubkey::from_str(&pool.pool_address)?;
+
+    // Get destination token mint
+    let destination_mint = if pool.pool_token_mints[0] == source_token.to_string() {
+        &pool.pool_token_mints[1]
+    } else {
+        &pool.pool_token_mints[0]
+    };
+    let destination_mint = Pubkey::from_str(destination_mint)?;
+
+    // Calculate ATAs
+    let user_source_token = get_associated_token_address(user, source_token);
+    let user_destination_token = get_associated_token_address(user, &destination_mint);
+
+    Ok(vec![
+        AccountMeta::new(pool_pubkey, false),
+        AccountMeta::new(user_source_token, false),
+        AccountMeta::new(user_destination_token, false),
+        // Add other required accounts...
+        AccountMeta::new_readonly(*user, true),
+        AccountMeta::new_readonly(spl_token::id(), false),
+    ])
+}
+
+fn build_swap_data(in_amount: u64, minimum_out_amount: u64) -> Result<Vec<u8>> {
+    let data = SwapInstructionData {
+        in_amount,
+        minimum_out_amount,
+    };
+
+    let mut buf = Vec::new();
+    data.serialize(&mut buf)?;
+    Ok(buf)
 }
