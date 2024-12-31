@@ -1,7 +1,13 @@
 use crate::common::{de_string_to_f64, CHEESE_MINT};
+use anchor_lang::{AnchorSerialize, InstructionData, ToAccountMetas};
+use anchor_spl::associated_token::get_associated_token_address;
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use solana_sdk::{
+    account_meta::AccountMeta, compute_budget::ComputeBudgetInstruction, instruction::Instruction,
+    pubkey::Pubkey, transaction::Transaction,
+};
 
 // -----------------------------------
 // Networking
@@ -225,4 +231,81 @@ struct MeteoraSwapRequest {
 #[derive(Debug, Deserialize)]
 struct MeteoraSwapResponse {
     transaction: String,
+}
+
+pub async fn build_meteora_swap_transaction(
+    pool: &MeteoraPool,
+    user_pubkey: &Pubkey,
+    source_token: &Pubkey,
+    in_amount: u64,
+    minimum_out_amount: u64,
+) -> Result<Transaction> {
+    let mut instructions = vec![
+        // Set compute budget
+        ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
+        ComputeBudgetInstruction::set_compute_unit_price(1),
+    ];
+
+    // Add the swap instruction
+    instructions.push(Instruction {
+        program_id: prog_dynamic_amm::ID,
+        accounts: build_swap_accounts(pool, user_pubkey, source_token)?,
+        data: build_swap_data(in_amount, minimum_out_amount)?,
+    });
+
+    Ok(Transaction::new_with_payer(
+        &instructions,
+        Some(user_pubkey),
+    ))
+}
+
+pub mod meteora_program {
+    use solana_sdk::declare_id;
+    declare_id!("M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K");
+}
+
+#[derive(AnchorSerialize)]
+struct SwapInstructionData {
+    in_amount: u64,
+    minimum_out_amount: u64,
+}
+
+fn build_swap_accounts(
+    pool: &MeteoraPool,
+    user: &Pubkey,
+    source_token: &Pubkey,
+) -> Result<Vec<AccountMeta>> {
+    let pool_pubkey = Pubkey::from_str(&pool.pool_address)?;
+
+    // Get destination token mint
+    let destination_mint = if pool.pool_token_mints[0] == source_token.to_string() {
+        &pool.pool_token_mints[1]
+    } else {
+        &pool.pool_token_mints[0]
+    };
+    let destination_mint = Pubkey::from_str(destination_mint)?;
+
+    // Calculate ATAs
+    let user_source_token = get_associated_token_address(user, source_token);
+    let user_destination_token = get_associated_token_address(user, &destination_mint);
+
+    Ok(vec![
+        AccountMeta::new(pool_pubkey, false),
+        AccountMeta::new(user_source_token, false),
+        AccountMeta::new(user_destination_token, false),
+        // Add other required accounts...
+        AccountMeta::new_readonly(*user, true),
+        AccountMeta::new_readonly(spl_token::id(), false),
+    ])
+}
+
+fn build_swap_data(in_amount: u64, minimum_out_amount: u64) -> Result<Vec<u8>> {
+    let data = SwapInstructionData {
+        in_amount,
+        minimum_out_amount,
+    };
+
+    let mut buf = Vec::new();
+    data.serialize(&mut buf)?;
+    Ok(buf)
 }

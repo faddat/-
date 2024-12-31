@@ -458,6 +458,16 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
             } else {
                 (1, 0)
             };
+
+            // Double check that the token isn't blacklisted
+            if is_token_blacklisted(&pool.pool_token_mints[other_ix]) {
+                println!(
+                    "Skipping blacklisted token: {}",
+                    pool.pool_token_mints[other_ix]
+                );
+                continue;
+            }
+
             println!("\nPool details:");
             println!("- Pool token mints: {:?}", pool.pool_token_mints);
             println!("- Pool token amounts: {:?}", pool.pool_token_amounts);
@@ -465,116 +475,25 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
 
             // Ensure all necessary token accounts exist before trading
             println!("\nEnsuring token accounts exist...");
-            executor.ensure_token_account(USDC_MINT).await?;
-            executor.ensure_token_account(CHEESE_MINT).await?;
-            executor
+            if let Err(e) = executor.ensure_token_account(USDC_MINT).await {
+                println!("Failed to ensure USDC token account: {}", e);
+                continue;
+            }
+            if let Err(e) = executor.ensure_token_account(CHEESE_MINT).await {
+                println!("Failed to ensure CHEESE token account: {}", e);
+                continue;
+            }
+            if let Err(e) = executor
                 .ensure_token_account(&pool.pool_token_mints[other_ix])
-                .await?;
+                .await
+            {
+                println!("Failed to ensure target token account: {}", e);
+                continue;
+            }
 
-            if opp.is_sell {
-                println!("\nExecuting sell path: USDC -> CHEESE -> Target -> CHEESE -> USDC");
-
-                // 1. USDC -> CHEESE on Meteora
-                let amount_in_usdc = ((opp.max_trade_size * opp.usdc_price) as u64) * 1_000_000; // Convert to USDC lamports (6 decimals)
-                println!("\nStep 1: USDC -> CHEESE");
-                println!("Amount in USDC: {}", amount_in_usdc as f64 / 1_000_000.0); // Display in human-readable USDC
-                let sig1 = executor
-                    .execute_trade(
-                        usdc_pool,
-                        USDC_MINT,
-                        CHEESE_MINT,
-                        amount_in_usdc,
-                        50, // 0.5% slippage
-                    )
-                    .await?;
-                println!("1. USDC -> CHEESE: {}", sig1);
-
-                // 2. CHEESE -> Target token
-                let amount_in_cheese = (opp.max_trade_size * 1_000_000_000.0) as u64;
-                println!("\nStep 2: CHEESE -> {}", opp.symbol);
-                println!("Amount in CHEESE: {}", amount_in_cheese);
-                let sig2 = executor
-                    .execute_trade(
-                        pool,
-                        CHEESE_MINT,
-                        &pool.pool_token_mints[other_ix],
-                        amount_in_cheese,
-                        50,
-                    )
-                    .await?;
-                println!("2. CHEESE -> {}: {}", opp.symbol, sig2);
-
-                // 3. Target -> CHEESE
-                let amount_in_target = (opp.other_qty * 0.1 * 1_000_000_000.0) as u64; // 10% of target token liquidity
-                println!("\nStep 3: {} -> CHEESE", opp.symbol);
-                println!("Amount in {}: {}", opp.symbol, amount_in_target);
-                let sig3 = executor
-                    .execute_trade(
-                        pool,
-                        &pool.pool_token_mints[other_ix],
-                        CHEESE_MINT,
-                        amount_in_target,
-                        50,
-                    )
-                    .await?;
-                println!("3. {} -> CHEESE: {}", opp.symbol, sig3);
-
-                // 4. CHEESE -> USDC
-                println!("\nStep 4: CHEESE -> USDC");
-                println!("Amount in CHEESE: {}", amount_in_cheese);
-                let sig4 = executor
-                    .execute_trade(usdc_pool, CHEESE_MINT, USDC_MINT, amount_in_cheese, 50)
-                    .await?;
-                println!("4. CHEESE -> USDC: {}", sig4);
-            } else {
-                println!("\nExecuting buy path: USDC -> CHEESE -> Target -> CHEESE -> USDC");
-
-                // 1. USDC -> CHEESE on Meteora
-                let amount_in_usdc = (opp.max_trade_size * opp.usdc_price * 1_000_000.0) as u64;
-                println!("\nStep 1: USDC -> CHEESE");
-                println!("Amount in USDC: {}", amount_in_usdc);
-                let sig1 = executor
-                    .execute_trade(usdc_pool, USDC_MINT, CHEESE_MINT, amount_in_usdc, 50)
-                    .await?;
-                println!("1. USDC -> CHEESE: {}", sig1);
-
-                // 2. CHEESE -> Target token
-                let amount_in_cheese = (opp.max_trade_size * 1_000_000_000.0) as u64;
-                println!("\nStep 2: CHEESE -> {}", opp.symbol);
-                println!("Amount in CHEESE: {}", amount_in_cheese);
-                let sig2 = executor
-                    .execute_trade(
-                        pool,
-                        CHEESE_MINT,
-                        &pool.pool_token_mints[other_ix],
-                        amount_in_cheese,
-                        50,
-                    )
-                    .await?;
-                println!("2. CHEESE -> {}: {}", opp.symbol, sig2);
-
-                // 3. Target -> CHEESE
-                let amount_in_target = (opp.other_qty * 0.1 * 1_000_000_000.0) as u64; // 10% of target token liquidity
-                println!("\nStep 3: {} -> CHEESE", opp.symbol);
-                println!("Amount in {}: {}", opp.symbol, amount_in_target);
-                let sig3 = executor
-                    .execute_trade(
-                        pool,
-                        &pool.pool_token_mints[other_ix],
-                        CHEESE_MINT,
-                        amount_in_target,
-                        50,
-                    )
-                    .await?;
-                println!("3. {} -> CHEESE: {}", opp.symbol, sig3);
-
-                // 4. CHEESE -> USDC
-                println!("\nStep 4: CHEESE -> USDC");
-                println!("Amount in CHEESE: {}", amount_in_cheese);
-                let sig4 = executor
-                    .execute_trade(usdc_pool, CHEESE_MINT, USDC_MINT, amount_in_cheese, 50)
-                    .await?;
-                println!("4. CHEESE -> USDC: {}", sig4);
+            match execute_trade_path(executor, pool, opp).await {
+                Ok(_) => println!("Trade path executed successfully"),
+                Err(e) => println!("Trade path failed: {}", e),
             }
         }
     }
