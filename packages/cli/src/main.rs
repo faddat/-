@@ -7,11 +7,9 @@ use libcheese::meteora::{fetch_meteora_cheese_pools, MeteoraPool};
 use libcheese::raydium::{fetch_raydium_cheese_pools, fetch_raydium_mint_ids};
 use libcheese::solana::TradeExecutor;
 use reqwest::Client;
-use solana_sdk::signature::Keypair;
 use solana_sdk::signer::keypair::read_keypair_file;
+use solana_sdk::signer::Signer;
 use std::collections::{HashMap, HashSet};
-use std::env;
-use std::str::FromStr;
 use std::time::Duration;
 use tokio::time;
 
@@ -121,11 +119,41 @@ async fn main() -> Result<()> {
         let keypair = read_keypair_file(&keypair_path)
             .map_err(|e| anyhow!("Failed to read keypair file: {}", e))?;
 
+        println!("\n=== Wallet Information ===");
+        println!("Address: {}", keypair.pubkey());
+
         let rpc_url = args
             .rpc_url
             .unwrap_or_else(|| "https://api.mainnet-beta.solana.com".to_string());
 
-        Some(TradeExecutor::new(&rpc_url, keypair))
+        let executor = TradeExecutor::new(&rpc_url, keypair);
+
+        // Get and display SOL balance
+        let sol_balance = executor
+            .rpc_client
+            .get_balance(&executor.wallet.pubkey())
+            .map_err(|e| anyhow!("Failed to get SOL balance: {}", e))?;
+        println!("SOL balance: {} SOL", sol_balance as f64 / 1_000_000_000.0);
+
+        // Get and display USDC balance
+        let usdc_balance = match executor.get_token_balance(&USDC_MINT.parse()?).await {
+            Ok(balance) => balance,
+            Err(_) => 0,
+        };
+        println!("USDC balance: {} USDC", usdc_balance as f64 / 1_000_000.0);
+
+        // Get and display CHEESE balance
+        let cheese_balance = match executor.get_token_balance(&CHEESE_MINT.parse()?).await {
+            Ok(balance) => balance,
+            Err(_) => 0,
+        };
+        println!(
+            "CHEESE balance: {} CHEESE",
+            cheese_balance as f64 / 1_000_000.0
+        );
+        println!("=====================\n");
+
+        Some(executor)
     } else {
         None
     };
@@ -554,13 +582,13 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
 
 fn find_arbitrage_opportunities(
     pools: &[MeteoraPool],
-    cheese_usdc_price: f64,
+    mut cheese_usdc_price: f64,
 ) -> Result<Vec<ArbitrageOpportunity>> {
     let mut opportunities = Vec::new();
 
     for pool in pools {
-        // Skip USDC pool and pools with derived prices
-        if pool.pool_address == "2rkTh46zo8wUvPJvACPTJ16RNUHEM9EZ1nLYkUxZEHkw" || pool.derived {
+        // Skip pools with derived prices
+        if pool.derived {
             continue;
         }
 
@@ -573,6 +601,13 @@ fn find_arbitrage_opportunities(
         let cheese_qty: f64 = pool.pool_token_amounts[cheese_ix].parse()?;
         let other_qty: f64 = pool.pool_token_amounts[other_ix].parse()?;
         let is_usdc_pool = pool.pool_token_mints.contains(&USDC_MINT.to_string());
+
+        // If this is the USDC pool, use it to set the CHEESE price
+        if is_usdc_pool {
+            cheese_usdc_price = other_qty / cheese_qty; // USDC is worth $1, so price = USDC/CHEESE
+            continue;
+        }
+
         let fee_percent: f64 = pool.total_fee_pct.trim_end_matches('%').parse::<f64>()? / 100.0;
 
         if cheese_qty <= 0.0 || other_qty <= 0.0 {

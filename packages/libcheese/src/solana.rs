@@ -9,6 +9,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use spl_associated_token_account::get_associated_token_address;
 use spl_token;
 use std::{str::FromStr, time::Duration};
 use tokio::time::sleep;
@@ -19,8 +20,8 @@ const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 pub struct TradeExecutor {
-    rpc_client: RpcClient,
-    wallet: Keypair,
+    pub rpc_client: RpcClient,
+    pub wallet: Keypair,
     http_client: Client,
 }
 
@@ -260,6 +261,14 @@ impl TradeExecutor {
                 println!("Creating token account for mint {}", mint);
                 self.create_token_account(mint).await
             }
+        }
+    }
+
+    pub async fn get_token_balance(&self, mint: &Pubkey) -> Result<u64> {
+        let token_account = get_associated_token_address(&self.wallet.pubkey(), mint);
+        match self.rpc_client.get_token_account_balance(&token_account) {
+            Ok(balance) => Ok(balance.amount.parse().unwrap_or(0)),
+            Err(_) => Ok(0), // Return 0 if account doesn't exist
         }
     }
 }
