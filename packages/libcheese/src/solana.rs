@@ -87,6 +87,7 @@ impl TradeExecutor {
         amount_in: u64,
     ) -> Result<Signature> {
         // 1. Get quote from Meteora
+        println!("Getting quote from Meteora...");
         let quote = meteora::get_meteora_quote(
             &self.http_client,
             &pool.pool_address,
@@ -97,11 +98,12 @@ impl TradeExecutor {
         .await?;
 
         println!(
-            "Got quote: {} -> {} ({} -> {})",
-            input_mint, output_mint, quote.in_amount, quote.out_amount
+            "Quote received: in_amount={}, out_amount={}, price_impact={}",
+            quote.in_amount, quote.out_amount, quote.price_impact
         );
 
         // 2. Get swap transaction
+        println!("Getting swap transaction...");
         let swap_tx = meteora::get_meteora_swap_transaction(
             &self.http_client,
             &quote,
@@ -110,20 +112,32 @@ impl TradeExecutor {
         .await?;
 
         // 3. Deserialize and sign transaction
-        let mut tx: Transaction = bincode::deserialize(&base64::decode(swap_tx)?)?;
+        println!("Deserializing transaction...");
+        let mut tx: Transaction = match bincode::deserialize(&base64::decode(&swap_tx)?) {
+            Ok(tx) => tx,
+            Err(e) => {
+                println!("Failed to deserialize transaction: {}", e);
+                println!("Raw transaction base64: {}", swap_tx);
+                return Err(anyhow!("Transaction deserialization failed: {}", e));
+            }
+        };
 
-        // Verify and update blockhash if needed
+        // Verify and update blockhash
+        println!("Getting recent blockhash...");
         let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
         if tx.message.recent_blockhash != recent_blockhash {
+            println!("Updating blockhash...");
             tx.message.recent_blockhash = recent_blockhash;
         }
 
         // Sign the transaction if not already signed
         if tx.signatures.is_empty() || tx.signatures[0] == Signature::default() {
+            println!("Signing transaction...");
             tx.sign(&[&self.wallet], tx.message.recent_blockhash);
         }
 
         // 4. Simulate transaction with detailed error reporting
+        println!("Simulating transaction...");
         match self.simulate_transaction(&tx).await {
             Ok(_) => println!("Transaction simulation successful"),
             Err(e) => {
@@ -133,6 +147,7 @@ impl TradeExecutor {
         }
 
         // 5. Send and confirm transaction
+        println!("Sending transaction...");
         self.send_and_confirm_transaction(&tx).await
     }
 
@@ -215,12 +230,26 @@ impl TradeExecutor {
 
         if let Some(err) = sim_result.value.err {
             println!("Simulation error: {:?}", err);
+            println!("Transaction details:");
+            println!("  Signatures: {:?}", transaction.signatures);
+            println!("  Message: {:?}", transaction.message);
+
             if let Some(logs) = sim_result.value.logs {
-                println!("Transaction logs:");
+                println!("\nTransaction logs:");
                 for log in logs {
                     println!("  {}", log);
                 }
             }
+
+            if let Some(accounts) = sim_result.value.accounts {
+                println!("\nAccount information:");
+                for (i, account) in accounts.iter().enumerate() {
+                    if let Some(acc) = account {
+                        println!("  Account {}: {} lamports={}", i, acc.owner, acc.lamports);
+                    }
+                }
+            }
+
             return Err(anyhow!("Transaction simulation failed: {:?}", err));
         }
         Ok(())

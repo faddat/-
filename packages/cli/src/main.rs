@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use libcheese::common::USDC_MINT;
-use libcheese::common::{parse_other_token_name, CHEESE_MINT};
+use libcheese::common::{is_token_blacklisted, parse_other_token_name, CHEESE_MINT};
 use libcheese::jupiter::fetch_jupiter_prices;
 use libcheese::meteora::{fetch_meteora_cheese_pools, MeteoraPool};
 use libcheese::raydium::{fetch_raydium_cheese_pools, fetch_raydium_mint_ids};
@@ -10,6 +10,8 @@ use reqwest::Client;
 use solana_sdk::signer::keypair::read_keypair_file;
 use solana_sdk::signer::Signer;
 use std::collections::{HashMap, HashSet};
+use std::env;
+use std::str::FromStr;
 use std::time::Duration;
 use tokio::time;
 
@@ -582,13 +584,26 @@ async fn run_iteration(executor: &Option<TradeExecutor>) -> Result<()> {
 
 fn find_arbitrage_opportunities(
     pools: &[MeteoraPool],
-    mut cheese_usdc_price: f64,
+    cheese_usdc_price: f64,
 ) -> Result<Vec<ArbitrageOpportunity>> {
     let mut opportunities = Vec::new();
 
     for pool in pools {
-        // Skip pools with derived prices
-        if pool.derived {
+        // Skip USDC pool and pools with derived prices
+        if pool.pool_address == "2rkTh46zo8wUvPJvACPTJ16RNUHEM9EZ1nLYkUxZEHkw" || pool.derived {
+            continue;
+        }
+
+        // Get the other token's mint (non-CHEESE token)
+        let other_mint = if pool.pool_token_mints[0] == CHEESE_MINT {
+            &pool.pool_token_mints[1]
+        } else {
+            &pool.pool_token_mints[0]
+        };
+
+        // Skip blacklisted tokens
+        if is_token_blacklisted(other_mint) {
+            println!("Skipping blacklisted token: {}", other_mint);
             continue;
         }
 
@@ -601,13 +616,6 @@ fn find_arbitrage_opportunities(
         let cheese_qty: f64 = pool.pool_token_amounts[cheese_ix].parse()?;
         let other_qty: f64 = pool.pool_token_amounts[other_ix].parse()?;
         let is_usdc_pool = pool.pool_token_mints.contains(&USDC_MINT.to_string());
-
-        // If this is the USDC pool, use it to set the CHEESE price
-        if is_usdc_pool {
-            cheese_usdc_price = other_qty / cheese_qty; // USDC is worth $1, so price = USDC/CHEESE
-            continue;
-        }
-
         let fee_percent: f64 = pool.total_fee_pct.trim_end_matches('%').parse::<f64>()? / 100.0;
 
         if cheese_qty <= 0.0 || other_qty <= 0.0 {
