@@ -32,7 +32,11 @@ pub async fn fetch_meteora_cheese_pools(client: &Client) -> Result<Vec<MeteoraPo
             return Err(anyhow!("Meteora request failed: {}", resp.status()));
         }
 
-        let parsed: PaginatedPoolSearchResponse = resp.json().await?;
+        let text = resp.text().await?;
+        println!("Raw response: {}", text);
+
+        let parsed: PaginatedPoolSearchResponse = serde_json::from_str(&text)?;
+
         println!(
             "Got {} pools on page {}, total_count={}",
             parsed.data.len(),
@@ -62,24 +66,14 @@ pub struct MeteoraPool {
     pub pool_address: String,
     pub pool_name: String,
     pub pool_token_mints: Vec<String>,
-    pub pool_type: String,
-    pub total_fee_pct: String,
+    pub pool_token_amounts: Vec<String>,
+    pub pool_version: u8,
+    pub vaults: Vec<String>,
 
-    // Add these new fields for swap accounts
-    pub a_vault: String,
-    pub b_vault: String,
-    pub a_token_vault: String,
-    pub b_token_vault: String,
-    pub a_vault_lp_mint: String,
-    pub b_vault_lp_mint: String,
-    pub a_vault_lp: String,
-    pub b_vault_lp: String,
-    pub protocol_token_fee: String,
-
-    #[allow(dead_code)]
-    unknown: bool,
-    #[allow(dead_code)]
-    permissioned: bool,
+    #[serde(default)]
+    pub pool_token_decimals: Vec<u8>,
+    #[serde(default)]
+    pub pool_token_prices: Vec<String>,
 
     #[serde(deserialize_with = "de_string_to_f64")]
     pub pool_tvl: f64,
@@ -87,10 +81,35 @@ pub struct MeteoraPool {
     #[serde(alias = "trading_volume")]
     pub daily_volume: f64,
 
-    pub pool_token_amounts: Vec<String>,
-
     #[serde(default)]
     pub derived: bool,
+    #[serde(default)]
+    pub unknown: bool,
+    #[serde(default)]
+    pub permissioned: bool,
+
+    #[serde(default)]
+    pub fee_volume: f64,
+
+    #[serde(rename = "fee_pct", default = "default_fee_pct")]
+    pub total_fee_pct: String,
+
+    // Add vault-related fields
+    pub vault_a: String,
+    pub vault_b: String,
+    pub token_vault_a: String,
+    pub token_vault_b: String,
+    pub vault_lp_mint_a: String,
+    pub vault_lp_mint_b: String,
+    pub vault_lp_token_a: String,
+    pub vault_lp_token_b: String,
+    pub protocol_fee_token_a: String,
+    pub protocol_fee_token_b: String,
+}
+
+// Add this function to provide a default fee percentage
+fn default_fee_pct() -> String {
+    "0.3".to_string()
 }
 
 // Add helper methods to MeteoraPool
@@ -103,16 +122,98 @@ impl MeteoraPool {
     pub fn get_token_program(&self) -> Pubkey {
         spl_token::ID
     }
+
+    // Add this method to initialize vault fields from the vaults array
+    pub fn init_vault_fields(&mut self) -> Result<()> {
+        if self.vaults.len() < 2 {
+            return Err(anyhow!("Pool must have at least 2 vaults"));
+        }
+
+        self.vault_a = self.vaults[0].clone();
+        self.vault_b = self.vaults[1].clone();
+
+        // For now, use placeholder values for other vault fields
+        self.token_vault_a = "placeholder".to_string();
+        self.token_vault_b = "placeholder".to_string();
+        self.vault_lp_mint_a = "placeholder".to_string();
+        self.vault_lp_mint_b = "placeholder".to_string();
+        self.vault_lp_token_a = "placeholder".to_string();
+        self.vault_lp_token_b = "placeholder".to_string();
+        self.protocol_fee_token_a = "placeholder".to_string();
+        self.protocol_fee_token_b = "placeholder".to_string();
+
+        Ok(())
+    }
+
+    // Update get_swap_accounts to use new field names
+    pub async fn get_swap_accounts(
+        &self,
+        user_source_token: Pubkey,
+        user_dest_token: Pubkey,
+    ) -> Result<MeteoraSwapAccounts> {
+        Ok(MeteoraSwapAccounts {
+            pool: self.pool_address.parse()?,
+            user_source_token,
+            user_destination_token: user_dest_token,
+            a_vault: self.vault_a.parse()?,
+            b_vault: self.vault_b.parse()?,
+            a_token_vault: self.token_vault_a.parse()?,
+            b_token_vault: self.token_vault_b.parse()?,
+            a_vault_lp_mint: self.vault_lp_mint_a.parse()?,
+            b_vault_lp_mint: self.vault_lp_mint_b.parse()?,
+            a_vault_lp: self.vault_lp_token_a.parse()?,
+            b_vault_lp: self.vault_lp_token_b.parse()?,
+            protocol_token_fee: self.protocol_fee_token_a.parse()?,
+        })
+    }
 }
 
 // -----------------------------------
 // Part 1: Data Models
 // -----------------------------------
+#[derive(Debug)]
+pub struct MeteoraSwapAccounts {
+    pub pool: Pubkey,
+    pub user_source_token: Pubkey,
+    pub user_destination_token: Pubkey,
+    pub a_vault: Pubkey,
+    pub b_vault: Pubkey,
+    pub a_token_vault: Pubkey,
+    pub b_token_vault: Pubkey,
+    pub a_vault_lp_mint: Pubkey,
+    pub b_vault_lp_mint: Pubkey,
+    pub a_vault_lp: Pubkey,
+    pub b_vault_lp: Pubkey,
+    pub protocol_token_fee: Pubkey,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PaginatedPoolSearchResponse {
     data: Vec<MeteoraPool>,
     page: i32,
     total_count: i32,
+}
+
+#[derive(Debug, Deserialize, Clone, Serialize)]
+pub struct MeteoraQuoteResponse {
+    pub pool_address: String,
+    pub input_mint: String,
+    pub output_mint: String,
+    pub in_amount: String,
+    pub out_amount: String,
+    pub fee_amount: String,
+    pub price_impact: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct MeteoraSwapRequest {
+    user_public_key: String,
+    quote_response: MeteoraQuoteResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct MeteoraSwapResponse {
+    transaction: String,
 }
 
 // -----------------------------------
@@ -139,8 +240,14 @@ pub async fn get_meteora_quote(
     let in_amount_pool: f64 = pool.pool_token_amounts[in_idx].parse()?;
     let out_amount_pool: f64 = pool.pool_token_amounts[out_idx].parse()?;
 
-    // Calculate fee
-    let fee_pct: f64 = pool.total_fee_pct.trim_end_matches('%').parse::<f64>()? / 100.0;
+    // Default fee if not specified (0.3%)
+    let fee_pct = pool
+        .total_fee_pct
+        .trim_end_matches('%')
+        .parse::<f64>()
+        .unwrap_or(0.3)
+        / 100.0;
+
     let amount_in_after_fee = amount_in as f64 * (1.0 - fee_pct);
 
     // Calculate out amount using constant product formula: (x + Δx)(y - Δy) = xy
@@ -179,52 +286,13 @@ async fn fetch_pool_state(client: &Client, pool_address: &str) -> Result<Meteora
     }
 
     let pools: Vec<MeteoraPool> = resp.json().await?;
-    pools
+    let mut pool = pools
         .into_iter()
         .next()
-        .ok_or_else(|| anyhow!("Pool not found: {}", pool_address))
-}
+        .ok_or_else(|| anyhow!("Pool not found: {}", pool_address))?;
 
-// Add these new structs to help with swap account setup
-#[derive(Debug)]
-pub struct MeteoraSwapAccounts {
-    pub pool: Pubkey,
-    pub user_source_token: Pubkey,
-    pub user_destination_token: Pubkey,
-    pub a_vault: Pubkey,
-    pub b_vault: Pubkey,
-    pub a_token_vault: Pubkey,
-    pub b_token_vault: Pubkey,
-    pub a_vault_lp_mint: Pubkey,
-    pub b_vault_lp_mint: Pubkey,
-    pub a_vault_lp: Pubkey,
-    pub b_vault_lp: Pubkey,
-    pub protocol_token_fee: Pubkey,
-}
-
-impl MeteoraPool {
-    // Add this helper method to get swap accounts
-    pub async fn get_swap_accounts(
-        &self,
-        user_source_token: Pubkey,
-        user_dest_token: Pubkey,
-    ) -> Result<MeteoraSwapAccounts> {
-        // Parse pool data to get required accounts
-        Ok(MeteoraSwapAccounts {
-            pool: self.pool_address.parse()?,
-            user_source_token,
-            user_destination_token: user_dest_token,
-            a_vault: self.a_vault.parse()?,
-            b_vault: self.b_vault.parse()?,
-            a_token_vault: self.a_token_vault.parse()?,
-            b_token_vault: self.b_token_vault.parse()?,
-            a_vault_lp_mint: self.a_vault_lp_mint.parse()?,
-            b_vault_lp_mint: self.b_vault_lp_mint.parse()?,
-            a_vault_lp: self.a_vault_lp.parse()?,
-            b_vault_lp: self.b_vault_lp.parse()?,
-            protocol_token_fee: self.protocol_token_fee.parse()?,
-        })
-    }
+    pool.init_vault_fields()?;
+    Ok(pool)
 }
 
 // Update get_meteora_swap_transaction to use proper accounts
@@ -277,26 +345,4 @@ pub async fn get_meteora_swap_transaction(
 
     let swap: MeteoraSwapResponse = resp.json().await?;
     Ok(swap.transaction)
-}
-
-#[derive(Debug, Deserialize, Clone, Serialize)]
-pub struct MeteoraQuoteResponse {
-    pub pool_address: String,
-    pub input_mint: String,
-    pub output_mint: String,
-    pub in_amount: String,
-    pub out_amount: String,
-    pub fee_amount: String,
-    pub price_impact: String,
-}
-
-#[derive(Debug, Serialize, Clone)]
-struct MeteoraSwapRequest {
-    user_public_key: String,
-    quote_response: MeteoraQuoteResponse,
-}
-
-#[derive(Debug, Deserialize)]
-struct MeteoraSwapResponse {
-    transaction: String,
 }

@@ -2122,6 +2122,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "bincode",
+ "lazy_static",
  "reqwest 0.12.12",
  "serde",
  "serde_json",

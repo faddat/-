@@ -14,7 +14,7 @@ use spl_token;
 use std::{str::FromStr, time::Duration};
 use tokio::time::sleep;
 
-use crate::meteora::{self, MeteoraPool};
+use crate::meteora::{self, MeteoraPool, MeteoraSwapAccounts};
 
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
@@ -44,8 +44,15 @@ impl TradeExecutor {
         input_mint: &str,
         output_mint: &str,
         amount_in: u64,
-        slippage_bps: u64,
+        slippage_bps: u16,
     ) -> Result<Signature> {
+        println!("Building trade with accounts:");
+        println!("- Pool: {}", pool.pool_address);
+        println!("- Input mint: {}", input_mint);
+        println!("- Output mint: {}", output_mint);
+        println!("- Amount in: {}", amount_in);
+        // Add more detailed logging here...
+
         // Check balance before trading
         self.check_token_balance(input_mint, amount_in).await?;
 
@@ -92,6 +99,32 @@ impl TradeExecutor {
         let dest_token =
             get_associated_token_address(&self.wallet.pubkey(), &Pubkey::from_str(output_mint)?);
 
+        // Determine if we're swapping A->B or B->A to select correct protocol fee account
+        let is_a_to_b = pool.pool_token_mints[0] == input_mint;
+        let protocol_fee = if is_a_to_b {
+            pool.protocol_fee_token_a.clone()
+        } else {
+            pool.protocol_fee_token_b.clone()
+        };
+
+        // Log all accounts for debugging
+        println!("Swap accounts:");
+        println!("1. pool: {}", pool.pool_address);
+        println!("2. userSourceToken: {}", source_token);
+        println!("3. userDestinationToken: {}", dest_token);
+        println!("4. aVault: {}", pool.vault_a);
+        println!("5. bVault: {}", pool.vault_b);
+        println!("6. aTokenVault: {}", pool.token_vault_a);
+        println!("7. bTokenVault: {}", pool.token_vault_b);
+        println!("8. aVaultLpMint: {}", pool.vault_lp_mint_a);
+        println!("9. bVaultLpMint: {}", pool.vault_lp_mint_b);
+        println!("10. aVaultLp: {}", pool.vault_lp_token_a);
+        println!("11. bVaultLp: {}", pool.vault_lp_token_b);
+        println!("12. protocolTokenFee: {}", protocol_fee);
+        println!("13. user: {}", self.wallet.pubkey());
+        println!("14. vaultProgram: {}", pool.get_vault_program()?);
+        println!("15. tokenProgram: {}", spl_token::ID);
+
         // 1. Get quote from Meteora
         let quote = meteora::get_meteora_quote(
             &self.http_client,
@@ -102,15 +135,25 @@ impl TradeExecutor {
         )
         .await?;
 
-        // 2. Get swap accounts
-        let swap_accounts = pool.get_swap_accounts(source_token, dest_token).await?;
-
-        // 3. Get swap transaction
+        // 2. Get swap transaction
         let swap_tx = meteora::get_meteora_swap_transaction(
             &self.http_client,
             &quote,
             &self.wallet.pubkey().to_string(),
-            &swap_accounts,
+            &MeteoraSwapAccounts {
+                pool: Pubkey::from_str(&pool.pool_address)?,
+                user_source_token: source_token,
+                user_destination_token: dest_token,
+                a_vault: Pubkey::from_str(&pool.vault_a)?,
+                b_vault: Pubkey::from_str(&pool.vault_b)?,
+                a_token_vault: Pubkey::from_str(&pool.token_vault_a)?,
+                b_token_vault: Pubkey::from_str(&pool.token_vault_b)?,
+                a_vault_lp_mint: Pubkey::from_str(&pool.vault_lp_mint_a)?,
+                b_vault_lp_mint: Pubkey::from_str(&pool.vault_lp_mint_b)?,
+                a_vault_lp: Pubkey::from_str(&pool.vault_lp_token_a)?,
+                b_vault_lp: Pubkey::from_str(&pool.vault_lp_token_b)?,
+                protocol_token_fee: Pubkey::from_str(&protocol_fee)?,
+            },
         )
         .await?;
 
