@@ -2,7 +2,7 @@ use serde::de::{self, Deserializer};
 use serde::Deserialize;
 
 pub const CHEESE_MINT: &str = "A3hzGcTxZNSc7744CWB2LR5Tt9VTtEaQYpP6nwripump";
-pub const USDC_MINT: &str = "27VkFr6b6DHoR6hSYZjUDbwJsV6MPSFqPavXLg8nduHW";
+pub const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 pub fn de_string_to_f64<'de, D>(deserializer: D) -> std::result::Result<f64, D::Error>
 where
